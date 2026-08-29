@@ -31,7 +31,10 @@
 // globally used constants & types, class (forward)
 // declarations and a few frequently used utility functions.
 
+// The BSDs declare alloca() in <stdlib.h> and have no <alloca.h>.
+#ifndef _ALLBSD_SOURCE
 #include <alloca.h>
+#endif
 #include <ctype.h>
 #include <inttypes.h>
 #include <string.h>
