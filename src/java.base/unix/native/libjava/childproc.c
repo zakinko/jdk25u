@@ -74,6 +74,24 @@ closeDescriptors(void)
     struct dirent *dirp;
     int from_fd = FAIL_FILENO + 1;
 
+#if defined(_ALLBSD_SOURCE) && !defined(__APPLE__)
+    /* On the BSDs other than macOS /dev/fd does not describe this process:
+     * it is devfs, not fdescfs, unless somebody mounted fdescfs there, and
+     * no default install does.  On FreeBSD and DragonFly it holds only 0, 1
+     * and 2, so the walk below finds nothing at or above from_fd, closes
+     * nothing, and still answers success -- the caller's fallback loop over
+     * _SC_OPEN_MAX then never runs and every descriptor the parent holds
+     * survives the exec.  NetBSD and OpenBSD keep a fixed 0..63 of device
+     * nodes there instead, so the walk fails on the first one that is not
+     * open and the fallback does the work, which is correct by accident and
+     * costs a pass over every descriptor up to the limit.
+     *
+     * closefrom(2) does exactly what is wanted here, as the AIX arm below
+     * does with F_CLOSEM. */
+    closefrom(from_fd);
+    return 1;
+#endif
+
     /* We're trying to close all file descriptors, but opendir() might
      * itself be implemented using a file descriptor, and we certainly
      * don't want to close that while it's in use.  We assume that if
