@@ -98,7 +98,7 @@ closeDescriptors(void)
     }
 
     while ((dirp = readdir(dp)) != NULL) {
-        if (!isdigit(dirp->d_name[0])) {
+        if (!isdigit((unsigned char)dirp->d_name[0])) {
             continue;
         }
         const long fd = strtol(dirp->d_name, NULL, 10);
