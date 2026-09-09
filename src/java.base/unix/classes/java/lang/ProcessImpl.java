@@ -327,6 +327,7 @@ final class ProcessImpl extends Process {
         switch (OperatingSystem.current()) {
             case LINUX:
             case MACOS:
+            case BSD:
                 stdin = (fds[0] == -1) ?
                         ProcessBuilder.NullOutputStream.INSTANCE :
                         new ProcessPipeOutputStream(fds[0]);
@@ -460,6 +461,7 @@ final class ProcessImpl extends Process {
             case LINUX:
             case MACOS:
             case AIX:
+            case BSD:
                 // There is a risk that pid will be recycled, causing us to
                 // kill the wrong process!  So we only terminate processes
                 // that appear to still be running.  Even with this check,
