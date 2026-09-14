@@ -2380,7 +2380,7 @@ static jobject read_field_value(Handle obj, long displacement, jchar type_char, 
           // enough answer.  It possible to crash in the is_oop call but that just means the crash happens
           // closer to where things went wrong.
           JVMCI_THROW_MSG_NULL(InternalError, err_msg("Read bad oop " INTPTR_FORMAT " at offset " JLONG_FORMAT " in object " INTPTR_FORMAT " of type %s",
-                                                      p2i(value), displacement, p2i(obj()), obj->klass()->external_name()));
+                                                      p2i(value), (jlong) displacement, p2i(obj()), obj->klass()->external_name()));
         }
 
         JVMCIObject result = JVMCIENV->get_object_constant(value);

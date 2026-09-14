@@ -796,6 +796,11 @@ static bool is_allocatable(size_t s) {
 
 
 bool os::has_allocatable_memory_limit(size_t* limit) {
+#ifndef RLIMIT_AS
+  // OpenBSD limits the data segment but has no address-space limit to read,
+  // so there is no ceiling to report here.
+  return false;
+#else
   struct rlimit rlim;
   int getrlimit_res = getrlimit(RLIMIT_AS, &rlim);
   // if there was an error when calling getrlimit, assume that there is no limitation
@@ -857,6 +862,7 @@ bool os::has_allocatable_memory_limit(size_t* limit) {
   }
   return true;
 #endif
+#endif // RLIMIT_AS
 }
 
 void* os::get_default_process_handle() {
