@@ -22,16 +22,18 @@ on:
       netbsd-version:
         description: 'NetBSD release to build the sysroot from'
         required: false
-        default: '9.4'
+        default: '10.1'
 
 concurrency:
   group: bootstrap-kit-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  # The kit has to run on every NetBSD pkgsrc supports, so build it against the
-  # oldest one rather than the newest.  lang/openjdk21's kits are netbsd-9.
-  NETBSD_SETS_VERSION: ${{ inputs.netbsd-version || '9.4' }}
+  # The kit has to run on every NetBSD it is meant to serve, so build it against
+  # the oldest one rather than the newest.  9.4 does not work: its headers have
+  # no PTHREAD_STACK_MIN, which os_posix.cpp needs.  10.1 is the oldest release
+  # this can be built against, so a kit from here serves 10 and 11.
+  NETBSD_SETS_VERSION: ${{ inputs.netbsd-version || '10.1' }}
 
 jobs:
   kit:
