@@ -135,8 +135,8 @@ bool CPUPerformanceInterface::CPUPerformance::initialize() {
 
 CPUPerformanceInterface::CPUPerformance::~CPUPerformance() {
 #if defined(__APPLE__) || defined(__NetBSD__) || BSD_HAS_CP_TIME
-  FREE_C_HEAP_ARRAY(_cpu_used_ticks);
-  FREE_C_HEAP_ARRAY(_cpu_total_ticks);
+  FREE_C_HEAP_ARRAY(uint64_t, _cpu_used_ticks);
+  FREE_C_HEAP_ARRAY(uint64_t, _cpu_total_ticks);
 #endif
 }
 
