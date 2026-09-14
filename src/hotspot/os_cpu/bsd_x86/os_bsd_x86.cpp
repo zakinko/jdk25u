@@ -51,6 +51,10 @@
 #include "utilities/events.hpp"
 #include "utilities/vmError.hpp"
 
+// sysctlbyname(3) for the microcode version below.
+#include <sys/types.h>
+#include <sys/sysctl.h>
+
 // put OS-includes here
 # include <sys/types.h>
 # include <sys/mman.h>

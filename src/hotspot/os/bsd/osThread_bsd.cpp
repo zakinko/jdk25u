@@ -30,13 +30,7 @@
 #include <signal.h>
 
 OSThread::OSThread()
-  : _thread_id(
-#ifdef __APPLE__
-        0
-#else
-        nullptr
-#endif
-    ),
+  : _thread_id(0),
     _pthread_id(nullptr),
 #ifdef __OpenBSD__
     _cpu_clockid((clockid_t)-1),

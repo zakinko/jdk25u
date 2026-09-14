@@ -121,9 +121,21 @@
   #include <uvm/uvm_extern.h>
 #endif
 
+#ifdef __FreeBSD__
+  #include <pthread_np.h>
+#endif
+
+#ifdef __NetBSD__
+#include <lwp.h>
+#endif
+
 #ifdef __APPLE__
   #include <mach/task_info.h>
   #include <mach-o/dyld.h>
+#endif
+
+#if !defined(__APPLE__) && !defined(__NetBSD__)
+  #include <pthread_np.h>
 #endif
 
 #ifndef MAP_ANONYMOUS
