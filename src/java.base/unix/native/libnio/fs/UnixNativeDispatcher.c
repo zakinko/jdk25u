@@ -1423,6 +1423,7 @@ Java_sun_nio_fs_UnixNativeDispatcher_fgetxattr0(JNIEnv* env, jclass clazz,
 #elif defined(_AIX)
     res = fgetea(fd, name, value, valueLen);
 #else
+    (void)name; (void)value;
     throwUnixException(env, ENOTSUP);
 #endif
 
@@ -1446,6 +1447,7 @@ Java_sun_nio_fs_UnixNativeDispatcher_fsetxattr0(JNIEnv* env, jclass clazz,
 #elif defined(_AIX)
     res = fsetea(fd, name, value, valueLen, 0);
 #else
+    (void)name; (void)value;
     throwUnixException(env, ENOTSUP);
 #endif
 
@@ -1467,6 +1469,7 @@ Java_sun_nio_fs_UnixNativeDispatcher_fremovexattr0(JNIEnv* env, jclass clazz,
 #elif defined(_AIX)
     res = fremoveea(fd, name);
 #else
+    (void)name;
     throwUnixException(env, ENOTSUP);
 #endif
 
@@ -1488,6 +1491,7 @@ Java_sun_nio_fs_UnixNativeDispatcher_flistxattr(JNIEnv* env, jclass clazz,
 #elif defined(_AIX)
     res = flistea(fd, list, (size_t)size);
 #else
+    (void)list;
     throwUnixException(env, ENOTSUP);
 #endif
 
