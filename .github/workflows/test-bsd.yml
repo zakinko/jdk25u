@@ -89,11 +89,18 @@ jobs:
             # Say what is actually there and what the binary asks for, so the
             # next failure does not need a third.
             echo "--- what the VM sees ---"
-            uname -r
+            uname -a
             ls -l "$JDK/lib/libjli.so" || echo "libjli.so is not there"
             readelf -d "$JDK/bin/java" 2>/dev/null | grep -E 'RPATH|RUNPATH|NEEDED' ||
               objdump -p "$JDK/bin/java" 2>/dev/null | grep -E 'RPATH|RUNPATH|NEEDED'
             ldd "$JDK/bin/java" 2>&1 | head -6
+
+            # RPATH is right and the library is there, so the question left is
+            # whether this ld.elf_so expands $ORIGIN.  Naming the directory
+            # outright answers it: if the launcher starts this way and not the
+            # other, $ORIGIN is what is missing.
+            echo "--- with the directory named outright ---"
+            LD_LIBRARY_PATH="$JDK/lib" "$JDK/bin/java" -version 2>&1 | head -3
             echo "--- end ---"
 
             "$JDK/bin/java" -version
