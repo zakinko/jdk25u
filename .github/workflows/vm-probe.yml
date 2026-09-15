@@ -1,0 +1,63 @@
+#
+# Boot a NetBSD VM and look at a JDK bundle that was built earlier.
+#
+# The launcher will not start in the VM -- "Shared object libjli.so not
+# found" -- while the library is sitting in the directory the RPATH names and
+# naming that directory outright does not help either. Each attempt to find
+# out why has cost four cross builds first, so this takes the bundle from a
+# run that already happened and boots nothing but the VM.
+#
+name: 'VM probe'
+
+on:
+  push:
+    branches:
+      - vm-probe
+
+env:
+  # The run whose bundles to look at.  A dispatch input would be tidier, but
+  # workflow_dispatch only reaches files that are on the default branch.
+  PROBE_RUN_ID: '35023637317'
+
+jobs:
+  probe:
+    name: probe
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 'Get the bundles from that run'
+        uses: actions/download-artifact@v6
+        with:
+          name: bundles-bsd-x86_64-netbsd
+          path: bundles
+          run-id: ${{ env.PROBE_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 'Unpack'
+        run: |
+          mkdir -p jdk
+          tar -xf bundles/jdk-bsd-x86_64-netbsd.tar.gz -C jdk
+          ls -l jdk
+
+      - name: 'Look at it from inside NetBSD'
+        uses: vmactions/netbsd-vm@v1.5.0
+        with:
+          release: '10.1'
+          mem: 4096
+          cpu: 2
+          usesh: true
+          copyback: false
+          run: |
+            set -x
+            JDK="$PWD/jdk/`ls jdk`"
+            uname -a
+            sysctl -n hw.machine hw.machine_arch
+            file "$JDK/bin/java" "$JDK/lib/libjli.so" /usr/bin/ldd /libexec/ld.elf_so
+            ls -l /libexec/ld.elf_so*
+            ls -l "$JDK/lib" | head -5
+            # What does the loader actually go looking for?
+            LD_LIBRARY_PATH="$JDK/lib" "$JDK/bin/java" -version || true
+            # And does anything else 64-bit here run at all?
+            /usr/bin/true && echo "a base binary runs"
+            # Mark it the way the port does on a NetBSD build and try again.
+            /usr/sbin/paxctl +m "$JDK/bin/java" "$JDK/lib/libjli.so" || true
+            "$JDK/bin/java" -version || true
