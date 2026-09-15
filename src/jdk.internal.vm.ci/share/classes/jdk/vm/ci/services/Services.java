@@ -258,6 +258,21 @@ public final class Services {
                 }
                 return "Windows";
             }
+            case BSD: {
+                // One enum value stands for all of the BSDs, so the name of
+                // the particular system can only come from the property.
+                // Take it only while it still names one of them, so that a
+                // value set on the command line cannot reach here.
+                String osName = System.getProperty("os.name");
+                switch (osName) {
+                    case "FreeBSD":
+                    case "OpenBSD":
+                    case "NetBSD":
+                    case "DragonFly":
+                        return osName;
+                }
+                return "BSD";
+            }
             default: throw new InternalError("missing case for " + os);
         }
     }
