@@ -70,7 +70,12 @@ AC_DEFUN([FLAGS_SETUP_SHARED_LIBS],
         # when DF_ORIGIN is set, which is what -z origin sets and which the
         # shared libraries already get below.  Without it bin/java cannot
         # find libjli.so beside itself.
-        SET_EXECUTABLE_ORIGIN="-Wl,-z,origin $SET_EXECUTABLE_ORIGIN"
+        #
+        # --disable-new-dtags asks for DT_RPATH rather than DT_RUNPATH, for
+        # the reason linux gives above and for one more: NetBSD 10's ld.elf_so
+        # does not act on DT_RUNPATH, so a launcher carrying only that tag
+        # cannot find libjli.so at all and the JDK runs on NetBSD 11 alone.
+        SET_EXECUTABLE_ORIGIN="-Wl,-z,origin $SET_EXECUTABLE_ORIGIN -Wl,--disable-new-dtags"
       fi
       SET_SHARED_LIBRARY_NAME='-Wl,-soname=[$]1'
 
