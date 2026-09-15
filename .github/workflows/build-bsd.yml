@@ -150,6 +150,14 @@ jobs:
         id: build
         uses: ./.github/actions/do-build
         with:
-          make-target: 'images ${{ inputs.make-arguments }}'
+          make-target: 'product-bundles test-bundles ${{ inputs.make-arguments }}'
+          platform: ${{ matrix.conf-name }}
+        if: inputs.dry-run == false
+
+      # The bundles are what a machine running the OS picks up to test with:
+      # this runner cannot execute a line of what it just built.
+      - name: 'Upload bundles'
+        uses: ./.github/actions/upload-bundles
+        with:
           platform: ${{ matrix.conf-name }}
         if: inputs.dry-run == false

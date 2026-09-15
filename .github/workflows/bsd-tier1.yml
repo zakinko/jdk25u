@@ -1,0 +1,37 @@
+#
+# Cross-build the BSDs, then run tier1 on a real NetBSD.
+#
+# Fork-only: the pull request carries the port, not the machinery for
+# measuring it here. Kept on its own branch so the four build jobs the PR
+# does have stay exactly as upstream sees them.
+#
+name: 'BSD tier1'
+
+on:
+  push:
+    branches:
+      - tier1-bsd-25
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'NetBSD release to run the tests in'
+        required: false
+        default: '10.1'
+
+concurrency:
+  group: bsd-tier1-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build
+    uses: ./.github/workflows/build-bsd.yml
+
+  test:
+    name: test
+    needs: build
+    uses: ./.github/workflows/test-bsd.yml
+    with:
+      target-os: 'netbsd'
+      platform: 'bsd-x86_64-netbsd'
+      release: ${{ inputs.release || '10.1' }}

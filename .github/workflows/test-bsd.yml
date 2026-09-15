@@ -1,0 +1,117 @@
+#
+# Run tier1 on a real BSD, in a virtual machine on the Linux runner.
+#
+# The BSD build cross-compiles and cannot run a line of what it produces, so
+# what it proves stops at "it compiles". This picks the bundles up and runs
+# them on the operating system itself.
+#
+# tier1 takes about nine hours on a 3-core, 2GB NetBSD machine, and a hosted
+# job is cut off at six. It is therefore split the way upstream's own test.yml
+# splits it -- twelve parts, the largest of which measured 70 minutes on that
+# machine, so each has room to spare even before the extra memory this VM gets.
+#
+name: 'Test (bsd)'
+
+on:
+  workflow_call:
+    inputs:
+      target-os:
+        required: false
+        type: string
+        default: 'netbsd'
+      platform:
+        required: false
+        type: string
+        default: 'bsd-x86_64-netbsd'
+      release:
+        description: 'The BSD release to run in'
+        required: false
+        type: string
+        default: '10.1'
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        test-name:
+          - 'lib-test/tier1'
+
+        include:
+          - test-name: 'lib-test/tier1'
+            test-suite: 'test/lib-test/:tier1'
+            test-slug: 'lib-test'
+
+    steps:
+      - name: 'Checkout the JDK source'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 'Get JTReg'
+        id: jtreg
+        uses: ./.github/actions/get-jtreg
+
+      - name: 'Get bundles'
+        id: bundles
+        uses: ./.github/actions/get-bundles
+        with:
+          platform: ${{ inputs.platform }}
+
+      - name: 'Run tests in a NetBSD virtual machine'
+        id: run-tests
+        uses: vmactions/netbsd-vm@v1.5.0
+        with:
+          release: ${{ inputs.release }}
+          mem: 6144
+          cpu: 4
+          usesh: true
+          copyback: true
+          envs: 'TEST_SUITE'
+          prepare: |
+            /usr/sbin/pkg_add bash gmake
+          run: |
+            set -e
+            export PATH=/usr/pkg/bin:/usr/pkg/sbin:$PATH
+            JDK="$PWD/bundles/jdk/`ls bundles/jdk`"
+            TESTS="$PWD/bundles/tests"
+            JT="$PWD/jtreg/installed"
+
+            # A JDK built on NetBSD is marked as it is linked; one cross-built
+            # from Linux cannot be, because paxctl(8) only exists here. Without
+            # the mark every launcher dies in VM initialisation, because PaX
+            # refuses the writable and executable mapping the JIT asks for.
+            find "$JDK" "$TESTS" -type f \( -perm -u+x -o -name '*.so' \) -print |
+              while read f; do /usr/sbin/paxctl +m "$f" >/dev/null 2>&1 || :; done
+
+            "$JDK/bin/java" -version
+
+            gmake test-prebuilt \
+              TEST="$TEST_SUITE" \
+              BOOT_JDK="$JDK" \
+              JT_HOME="$JT" \
+              JDK_IMAGE_DIR="$JDK" \
+              TEST_IMAGE_DIR="$TESTS" \
+              JTREG='JAVA_OPTIONS=-XX:-CreateCoredumpOnCrash;VERBOSE=fail,error,time;KEYWORDS=!headful'
+        env:
+          TEST_SUITE: ${{ matrix.test-suite }}
+
+      - name: 'Package test results'
+        run: |
+          mkdir -p results
+          if [ -d build ]; then
+            find build -name '*.jtr' -o -name 'summary.txt' -o -name 'stats.txt' |
+              while read f; do
+                d="results/$(dirname "$f")"; mkdir -p "$d"; cp "$f" "$d/"
+              done
+          fi
+        if: always()
+
+      - name: 'Upload test results'
+        uses: actions/upload-artifact@v6
+        with:
+          name: results-${{ inputs.target-os }}-${{ matrix.test-slug }}
+          path: results
+          retention-days: 14
+        if: always()
