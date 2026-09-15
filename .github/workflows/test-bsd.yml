@@ -85,6 +85,17 @@ jobs:
             find "$JDK" "$TESTS" -type f \( -perm -u+x -o -name '*.so' \) -print |
               while read f; do /usr/sbin/paxctl +m "$f" >/dev/null 2>&1 || :; done
 
+            # The launcher failing to find libjli.so has cost two runs now.
+            # Say what is actually there and what the binary asks for, so the
+            # next failure does not need a third.
+            echo "--- what the VM sees ---"
+            uname -r
+            ls -l "$JDK/lib/libjli.so" || echo "libjli.so is not there"
+            readelf -d "$JDK/bin/java" 2>/dev/null | grep -E 'RPATH|RUNPATH|NEEDED' ||
+              objdump -p "$JDK/bin/java" 2>/dev/null | grep -E 'RPATH|RUNPATH|NEEDED'
+            ldd "$JDK/bin/java" 2>&1 | head -6
+            echo "--- end ---"
+
             "$JDK/bin/java" -version
 
             gmake test-prebuilt \
