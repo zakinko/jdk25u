@@ -121,6 +121,8 @@ static jfieldID loadObjectList_ID = 0;
 static jmethodID createClosestSymbol_ID = 0;
 static jmethodID createLoadObject_ID = 0;
 static jmethodID listAdd_ID = 0;
+static jfieldID threadList_ID = 0;
+static jmethodID getThreadForThreadId_ID = 0;
 
 static void throw_new_debugger_exception(JNIEnv* env, const char* errMsg) {
   jclass clazz = (*env)->FindClass(env, "sun/jvm/hotspot/debugger/DebuggerException");
@@ -1123,6 +1125,77 @@ static int is_elf_file(const char* path) {
 static void publish_load_objects(JNIEnv* env, jobject this_obj,
                                  struct ps_prochandle* ph);
 
+/*
+ * Hands the debugger the threads of a live process.
+ *
+ * A core carries its threads in the notes and parse_core_notes() picks them
+ * up there; a live process has to be asked.  Without this the thread list
+ * stays empty and every tool that walks it -- clhsdb's pstack, the debug
+ * server -- prints nothing at all while looking like it worked.
+ *
+ * NetBSD walks the threads with PT_LWPNEXT, which reports the LWP following
+ * the one named in pl_lwpid and ends by reporting 0; PT_LWPINFO is marked
+ * obsolete in <sys/ptrace.h>.  FreeBSD hands over the whole list at once.
+ * Registers are not collected here: getThreadIntegerRegisterSet0() asks for
+ * them by LWP id when a caller wants them.
+ */
+static void add_live_thread(JNIEnv* env, jobject this_obj,
+                            struct ps_prochandle* ph, sa_lwpid_t lwpid) {
+  thread_info* t;
+  jobject thread;
+  jobject threads;
+
+  t = (thread_info*)calloc(1, sizeof(*t));
+  if (t == NULL) {
+    return;
+  }
+  t->lwpid = lwpid;
+  t->next = ph->threads;
+  ph->threads = t;
+
+  thread = (*env)->CallObjectMethod(env, this_obj, getThreadForThreadId_ID,
+                                    (jlong)lwpid);
+  CHECK_EXCEPTION;
+  threads = (*env)->GetObjectField(env, this_obj, threadList_ID);
+  CHECK_EXCEPTION;
+  (*env)->CallBooleanMethod(env, threads, listAdd_ID, thread);
+  CHECK_EXCEPTION;
+  (*env)->DeleteLocalRef(env, thread);
+  (*env)->DeleteLocalRef(env, threads);
+}
+
+static void fill_threads(JNIEnv* env, jobject this_obj,
+                         struct ps_prochandle* ph) {
+#if defined(__NetBSD__)
+  struct ptrace_lwpstatus pl;
+
+  memset(&pl, 0, sizeof(pl));
+  pl.pl_lwpid = 0;
+  while (ptrace(PT_LWPNEXT, ph->pid, (void*)&pl, sizeof(pl)) != -1 &&
+         pl.pl_lwpid != 0) {
+    add_live_thread(env, this_obj, ph, (sa_lwpid_t)pl.pl_lwpid);
+  }
+#elif defined(__FreeBSD__)
+  lwpid_t* ids;
+  int n, i;
+
+  n = ptrace(PT_GETNUMLWPS, ph->pid, NULL, 0);
+  if (n <= 0) {
+    return;
+  }
+  ids = (lwpid_t*)calloc((size_t)n, sizeof(*ids));
+  if (ids == NULL) {
+    return;
+  }
+  if (ptrace(PT_GETLWPLIST, ph->pid, (void*)ids, n) > 0) {
+    for (i = 0; i < n; i++) {
+      add_live_thread(env, this_obj, ph, (sa_lwpid_t)ids[i]);
+    }
+  }
+  free(ids);
+#endif
+}
+
 static void fill_load_objects(JNIEnv* env, jobject this_obj,
                               struct ps_prochandle* ph) {
   struct kinfo_vmentry* vmmap;
@@ -1202,6 +1275,12 @@ JNIEXPORT void JNICALL Java_sun_jvm_hotspot_debugger_bsd_BsdDebuggerLocal_init0
   CHECK_EXCEPTION;
   listAdd_ID = (*env)->GetMethodID(env, listClass, "add", "(Ljava/lang/Object;)Z");
   CHECK_EXCEPTION;
+
+  threadList_ID = (*env)->GetFieldID(env, cls, "threadList", "Ljava/util/List;");
+  CHECK_EXCEPTION;
+  getThreadForThreadId_ID = (*env)->GetMethodID(env, cls, "getThreadForThreadId",
+      "(J)Lsun/jvm/hotspot/debugger/ThreadProxy;");
+  CHECK_EXCEPTION;
 }
 
 /*
@@ -1247,6 +1326,7 @@ JNIEXPORT void JNICALL Java_sun_jvm_hotspot_debugger_bsd_BsdDebuggerLocal_attach
   ph->core_fd = -1;
   (*env)->SetLongField(env, this_obj, p_ps_prochandle_ID, (jlong)(intptr_t)ph);
 
+  fill_threads(env, this_obj, ph);
   fill_load_objects(env, this_obj, ph);
 }
 
