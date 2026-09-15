@@ -7,17 +7,23 @@
 # out why has cost four cross builds first, so this takes the bundle from a
 # run that already happened and boots nothing but the VM.
 #
+# The first pass established that the file is there and is a good amd64 ELF,
+# so rtld is not failing to find it; it is finding it and throwing it away.
+# NetBSD 10's map_object.c refuses any shared object that does not have
+# exactly two PT_LOAD segments, and search.c discards that error and carries
+# on, so a rejected library is reported as a missing one. Ours has four,
+# because lld puts code and rodata in separate segments.
+#
+# rtld only hides the reason while it is searching. Handed a path with a
+# slash in it -- through LD_PRELOAD, or through dlopen -- it loads the file
+# directly and says what it did not like. That is what this asks it.
+#
 name: 'VM probe'
 
 on:
   push:
     branches:
       - vm-probe
-
-env:
-  # The run whose bundles to look at.  A dispatch input would be tidier, but
-  # workflow_dispatch only reaches files that are on the default branch.
-  PROBE_RUN_ID: '35023637317'
 
 jobs:
   probe:
@@ -29,7 +35,10 @@ jobs:
         with:
           name: bundles-bsd-x86_64-netbsd
           path: bundles
-          run-id: ${{ env.PROBE_RUN_ID }}
+          # The run whose bundles to look at.  A dispatch input would be
+          # tidier, but workflow_dispatch only reaches files that are on the
+          # default branch.
+          run-id: '35023637317'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 'Unpack'
@@ -38,7 +47,7 @@ jobs:
           tar -xf bundles/jdk-bsd-x86_64-netbsd.tar.gz -C jdk
           ls -l jdk
 
-      - name: 'Look at it from inside NetBSD'
+      - name: 'Ask rtld for the real reason'
         uses: vmactions/netbsd-vm@v1.5.0
         with:
           release: '10.1'
@@ -49,15 +58,28 @@ jobs:
           run: |
             set -x
             JDK="$PWD/jdk/`ls jdk`"
-            uname -a
-            sysctl -n hw.machine hw.machine_arch
-            file "$JDK/bin/java" "$JDK/lib/libjli.so" /usr/bin/ldd /libexec/ld.elf_so
-            ls -l /libexec/ld.elf_so*
-            ls -l "$JDK/lib" | head -5
-            # What does the loader actually go looking for?
-            LD_LIBRARY_PATH="$JDK/lib" "$JDK/bin/java" -version || true
-            # And does anything else 64-bit here run at all?
-            /usr/bin/true && echo "a base binary runs"
-            # Mark it the way the port does on a NetBSD build and try again.
-            /usr/sbin/paxctl +m "$JDK/bin/java" "$JDK/lib/libjli.so" || true
-            "$JDK/bin/java" -version || true
+
+            # How many PT_LOAD on each side?  This system's own libraries
+            # have to satisfy this system's loader, so they are the control.
+            for f in "$JDK/lib/libjli.so" /lib/libc.so.12 /usr/lib/libz.so; do
+                    echo "$f: `readelf -l \"$f\" | grep -c '^  LOAD'` PT_LOAD"
+            done
+
+            # LD_PRELOAD takes a path, so rtld loads it directly instead of
+            # searching, and prints what it would otherwise swallow.
+            LD_PRELOAD="$JDK/lib/libjli.so" /usr/bin/true || true
+            LD_PRELOAD=/usr/lib/libz.so /usr/bin/true || true
+
+            # The same question through dlopen, which hands back the text.
+            cat > /var/tmp/dl.c <<'EOF'
+            #include <dlfcn.h>
+            #include <stdio.h>
+            int main(int argc, char **argv) {
+                    void *h = dlopen(argv[1], RTLD_NOW);
+                    printf("dlopen %s: %s\n", argv[1], h ? "ok" : dlerror());
+                    return 0;
+            }
+            EOF
+            cc -o /var/tmp/dl /var/tmp/dl.c
+            /var/tmp/dl "$JDK/lib/libjli.so"
+            /var/tmp/dl /usr/lib/libz.so
