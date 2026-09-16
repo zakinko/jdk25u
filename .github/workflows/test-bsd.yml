@@ -200,7 +200,17 @@ jobs:
         run: |
           mkdir -p results
           if [ -d build ]; then
-            find build -name '*.jtr' -o -name 'summary.txt' -o -name 'stats.txt' |
+            # hs_err too.  A test that crashes leaves its .jtr saying only
+            #
+            #   # Problematic frame:
+            #   #
+            #
+            # because the frame and the library map are in the hs_err file,
+            # and that was not being collected.  Without it a SIGSEGV cannot
+            # be attributed to anything -- java/foreign/LibraryLookupTest
+            # crashed twice in the same place and there was nothing to read.
+            find build -name '*.jtr' -o -name 'summary.txt' -o -name 'stats.txt' \
+                       -o -name 'hs_err_pid*.log' -o -name 'replay_pid*.log' |
               while read f; do
                 d="results/$(dirname "$f")"; mkdir -p "$d"; cp "$f" "$d/"
               done
