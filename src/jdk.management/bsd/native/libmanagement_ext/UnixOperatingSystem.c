@@ -33,7 +33,6 @@
 #if !defined(__NetBSD__)
 #include <sys/user.h>
 #endif
-#include <ctype.h>
 #include <unistd.h>
 
 #include "jvm.h"
@@ -185,71 +184,17 @@ Java_com_sun_management_internal_OperatingSystemImpl_getHostConfiguredCpuCount0
 #endif
 }
 
-
-JNIEXPORT jlong JNICALL
-Java_com_sun_management_internal_OperatingSystemImpl_getCommittedVirtualMemorySize0
-  (JNIEnv *env, jobject mbean)
-{
-  // getrlimitusage(2) was introduced in FreeBSD 14.2 (even if the man
-  // page says FreeBSD 15.)
-#if defined(__FreeBSD__) && __FreeBSD_version >= 1402000
-  rlim_t vmm_usage;
-
-  int result = getrlimitusage(RLIMIT_AS, 0, &vmm_usage);
-  if (result != 0) {
-    throw_internal_error(env, "Unable get committed memory size");
-    return -1;
-  }
-
-  return (jlong) vmm_usage;
-#else
-  // Not implemented yet, use fallback value used historically here.
-  return (64 * MB);
-#endif
-}
-
-JNIEXPORT jlong JNICALL
-Java_com_sun_management_internal_OperatingSystemImpl_getOpenFileDescriptorCount0
-  (JNIEnv *env, jobject mbean)
-{
-  // getrlimitusage(2) was introduced in FreeBSD 14.2 (even if the man
-  // page says FreeBSD 15.)
-#if defined(__FreeBSD__) && __FreeBSD_version >= 1402000
-    rlim_t nfiles;
-
-    int result = getrlimitusage(RLIMIT_NOFILE, 0, &nfiles);
-    if (result != 0) {
-      throw_internal_error(env, "Unable get number of file descriptors");
-      return -1;
-    }
-
-    return (jlong) nfiles;
-#elif defined(__OpenBSD__)
-    return getdtablecount();
-#else
-    // Fall back to iterating /dev/fd on other BSDs
-    DIR *dirp;
-    struct dirent* dentp;
-    jlong fds = 0;
-
-#define FD_DIR "/dev/fd"
-
-    dirp = opendir(FD_DIR);
-    if (dirp == NULL) {
-        throw_internal_error(env, "Unable to open directory " FD_DIR);
-        return -1;
-    }
-
-    // iterate through directory entries, skipping '.' and '..'
-    // each entry represents an open file descriptor.
-    while ((dentp = readdir(dirp)) != NULL) {
-        if (isdigit((unsigned char) dentp->d_name[0])) {
-            fds++;
-        }
-    }
-
-    closedir(dirp);
-    // subtract by 1 which was the fd open for this implementation
-    return (fds - 1);
-#endif
-}
+/*
+ * getCommittedVirtualMemorySize0 and getOpenFileDescriptorCount0 are not
+ * here.  The BSD port carries versions of them in this file, but this tree
+ * also compiles unix/native/libmanagement_ext/OperatingSystemImpl.c, which
+ * defines both, and the two collide:
+ *
+ *   UnixOperatingSystem.c:207: multiple definition of
+ *   `Java_..._getCommittedVirtualMemorySize0'; OperatingSystemImpl.c:157:
+ *   first defined here
+ *
+ * The generic ones read the same rlimit and the same /dev/fd, so nothing is
+ * lost by letting them serve.  What is only here is the CPU load group,
+ * which unix/ does not implement at all.
+ */
