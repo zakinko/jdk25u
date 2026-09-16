@@ -243,7 +243,7 @@ Java_com_sun_management_internal_OperatingSystemImpl_getOpenFileDescriptorCount0
     // iterate through directory entries, skipping '.' and '..'
     // each entry represents an open file descriptor.
     while ((dentp = readdir(dirp)) != NULL) {
-        if (isdigit(dentp->d_name[0])) {
+        if (isdigit((unsigned char) dentp->d_name[0])) {
             fds++;
         }
     }
