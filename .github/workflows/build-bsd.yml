@@ -154,6 +154,40 @@ jobs:
           platform: ${{ matrix.conf-name }}
         if: inputs.dry-run == false
 
+      # NetBSD 10's run-time linker refuses a shared object that does not have
+      # exactly two PT_LOAD segments, and then reports the refusal as the file
+      # being missing -- so a build that loses -Wl,-z,noseparate-code comes
+      # back as "Shared object libjli.so not found" from a directory holding
+      # libjli.so, which is a day of looking in the wrong place.  Count them
+      # here, where the answer is unambiguous.
+      - name: 'Check the load segments NetBSD will accept'
+        run: |
+          seen=0
+          bad=0
+          for f in $(find build -name '*.so' -path '*/images/*'); do
+            seen=$((seen + 1))
+            n=$(readelf -l "$f" | grep -c '^  LOAD')
+            if [ "$n" -gt 2 ]; then
+              echo "$f: $n PT_LOAD"
+              bad=$((bad + 1))
+            fi
+          done
+          # A check that looks at nothing passes for the wrong reason.  A
+          # headless product image holds 34 shared objects, so twenty is
+          # well clear of a real image and nowhere near an empty search.
+          if [ "$seen" -lt 20 ]; then
+            echo "only $seen shared objects found under build/*/images;"
+            echo "this check is not looking where the libraries are."
+            exit 1
+          fi
+          if [ "$bad" -gt 0 ]; then
+            echo "$bad of $seen libraries have more than two PT_LOAD segments;"
+            echo "NetBSD 10 reports every one of them as not found."
+            exit 1
+          fi
+          echo "$seen shared objects, all with at most two PT_LOAD segments"
+        if: inputs.dry-run == false && matrix.target-os == 'netbsd'
+
       # The bundles are what a machine running the OS picks up to test with:
       # this runner cannot execute a line of what it just built.  Only NetBSD
       # makes them, because only NetBSD is tested here -- and because the
