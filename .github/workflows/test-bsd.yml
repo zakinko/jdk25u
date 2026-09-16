@@ -128,7 +128,7 @@ jobs:
           copyback: true
           envs: 'TEST_SUITE'
           prepare: |
-            /usr/sbin/pkg_add bash gmake
+            /usr/sbin/pkg_add bash gmake zip unzip
           run: |
             set -e
             export PATH=/usr/pkg/bin:/usr/pkg/sbin:$PATH
@@ -142,6 +142,68 @@ jobs:
             # refuses the writable and executable mapping the JIT asks for.
             find "$JDK" "$TESTS" -type f \( -perm -u+x -o -name '*.so' \) -print |
               while read f; do /usr/sbin/paxctl +m "$f" >/dev/null 2>&1 || :; done
+
+            # The launchers inside the jmods need it too.  jlink assembles a
+            # new image out of those, not out of bin/, so marking only the
+            # unpacked tree leaves every image a test builds unmarked, and it
+            # dies before running a line:
+            #
+            #   Error occurred during initialization of VM
+            #   Could not reserve enough space in CodeHeap 'profiled nmethods'
+            #
+            # which is PaX MPROTECT refusing the JIT's mapping, not a size.
+            # Eight tier1 tests build an image and run it, and all eight
+            # failed with that line.  A JDK built on NetBSD does not need this
+            # -- paxctl runs during its build, so the copies it packs are
+            # already marked -- but one cross-built from Linux cannot be,
+            # paxctl being NetBSD's own tool.
+            #
+            # A jmod is a zip behind a four-byte header.  Replace only the
+            # entries that need marking and pass -D, because the jmod reader
+            # rejects directory entries that a plain rezip would add:
+            #
+            #   Resources tree, invalid data structure, skipping /java.base/
+            #
+            # Most jmods carry no launcher; those are left alone.
+            echo "--- marking the launchers inside the jmods ---"
+            WORK="$PWD/jmodwork"
+            for m in "$JDK"/jmods/*.jmod; do
+              rm -rf "$WORK"; mkdir -p "$WORK"
+              dd if="$m" bs=1 count=4 of="$WORK/magic" 2>/dev/null
+              dd if="$m" bs=4 skip=1 of="$WORK/body.zip" 2>/dev/null
+              ( cd "$WORK" && unzip -q -o body.zip 'bin/*' ) >/dev/null 2>&1 || continue
+              [ -d "$WORK/bin" ] || continue
+              n=0
+              for f in "$WORK"/bin/*; do
+                [ -f "$f" ] || continue
+                /usr/sbin/paxctl +m "$f" >/dev/null 2>&1 && n=`expr $n + 1`
+              done
+              [ "$n" -gt 0 ] || continue
+              ( cd "$WORK" && zip -q -D -X body.zip bin/* ) || continue
+              cat "$WORK/magic" "$WORK/body.zip" > "$m.new" && mv "$m.new" "$m"
+              echo "  $n in ${m##*/}"
+            done
+            rm -rf "$WORK"
+
+            # Prove it took: build the smallest image jlink can make and read
+            # the flag back off its launcher.  Getting this wrong costs a full
+            # run, and it fails as a CodeHeap message an hour later rather
+            # than here.
+            "$JDK/bin/jlink" --module-path "$JDK/jmods" --add-modules java.base \
+                --output "$PWD/paxprobe" >/dev/null 2>&1 || :
+            if [ -x "$PWD/paxprobe/bin/java" ]; then
+              /usr/sbin/paxctl "$PWD/paxprobe/bin/java"
+              /usr/sbin/paxctl "$PWD/paxprobe/bin/java" | grep -q 'mprotect' || {
+                echo "a jlink-built image comes out unmarked; the eight image"
+                echo "tests will fail in VM initialisation"
+                exit 1
+              }
+              "$PWD/paxprobe/bin/java" -version 2>&1 | head -2
+            else
+              echo "jlink could not build a probe image"
+              exit 1
+            fi
+            rm -rf "$PWD/paxprobe"
 
             # The launcher failing to find libjli.so has cost two runs now.
             # Say what is actually there and what the binary asks for, so the
