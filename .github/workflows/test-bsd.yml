@@ -38,9 +38,67 @@ jobs:
       fail-fast: false
       matrix:
         test-name:
+          - 'jdk/tier1 part 1'
+          - 'jdk/tier1 part 2'
+          - 'jdk/tier1 part 3'
+          - 'langtools/tier1'
+          - 'hs/tier1 common'
+          - 'hs/tier1 compiler part 1'
+          - 'hs/tier1 compiler part 2'
+          - 'hs/tier1 compiler part 3'
+          - 'hs/tier1 gc'
+          - 'hs/tier1 runtime'
+          - 'hs/tier1 serviceability'
           - 'lib-test/tier1'
 
+        # The same twelve groups upstream's test.yml uses, so that a part
+        # failing here can be compared with the same part on Linux. jaxp is
+        # not among them: its tier1 selects no tests.
         include:
+          - test-name: 'jdk/tier1 part 1'
+            test-suite: 'test/jdk/:tier1_part1'
+            test-slug: 'jdk-part1'
+
+          - test-name: 'jdk/tier1 part 2'
+            test-suite: 'test/jdk/:tier1_part2'
+            test-slug: 'jdk-part2'
+
+          - test-name: 'jdk/tier1 part 3'
+            test-suite: 'test/jdk/:tier1_part3'
+            test-slug: 'jdk-part3'
+
+          - test-name: 'langtools/tier1'
+            test-suite: 'test/langtools/:tier1'
+            test-slug: 'langtools'
+
+          - test-name: 'hs/tier1 common'
+            test-suite: 'test/hotspot/jtreg/:tier1_common'
+            test-slug: 'hs-common'
+
+          - test-name: 'hs/tier1 compiler part 1'
+            test-suite: 'test/hotspot/jtreg/:tier1_compiler_1'
+            test-slug: 'hs-compiler1'
+
+          - test-name: 'hs/tier1 compiler part 2'
+            test-suite: 'test/hotspot/jtreg/:tier1_compiler_2'
+            test-slug: 'hs-compiler2'
+
+          - test-name: 'hs/tier1 compiler part 3'
+            test-suite: 'test/hotspot/jtreg/:tier1_compiler_3'
+            test-slug: 'hs-compiler3'
+
+          - test-name: 'hs/tier1 gc'
+            test-suite: 'test/hotspot/jtreg/:tier1_gc'
+            test-slug: 'hs-gc'
+
+          - test-name: 'hs/tier1 runtime'
+            test-suite: 'test/hotspot/jtreg/:tier1_runtime'
+            test-slug: 'hs-runtime'
+
+          - test-name: 'hs/tier1 serviceability'
+            test-suite: 'test/hotspot/jtreg/:tier1_serviceability'
+            test-slug: 'hs-serviceability'
+
           - test-name: 'lib-test/tier1'
             test-suite: 'test/lib-test/:tier1'
             test-slug: 'lib-test'
