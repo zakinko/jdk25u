@@ -55,7 +55,19 @@ case "$os" in
   netbsd)
     # comp holds the headers and the static libraries.  The X11 sets are not
     # fetched: the build is headless, see below.
-    base=https://cdn.netbsd.org/pub/NetBSD/NetBSD-11.0/amd64/binary/sets
+    #
+    # Build against the released version, not the newest.  NetBSD 11's
+    # <pthread.h> resolves pthread_attr_destroy to __libc_thr_attr_destroy,
+    # a symbol NetBSD 10 does not export, so a JDK built against 11 dies on
+    # 10 the moment the launcher dlopens libjvm.so:
+    #
+    #   Undefined PLT symbol "__libc_thr_attr_destroy" (symnum = 21)
+    #
+    # 10 is also as far back as this source builds -- a 9.4 sysroot stops in
+    # os_posix.cpp, where PTHREAD_STACK_MIN is undeclared until 10 -- and it
+    # is the version vmactions offers, so it is what gets tested.
+    netbsd_release=10.1
+    base=https://cdn.netbsd.org/pub/NetBSD/NetBSD-$netbsd_release/amd64/binary/sets
     for set in base comp; do
       fetch "$set.tar.xz" "$base/$set.tar.xz"
       extract "$set.tar.xz"
