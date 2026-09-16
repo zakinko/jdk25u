@@ -1,22 +1,15 @@
 #
-# Boot a NetBSD VM and look at a JDK bundle that was built earlier.
+# Which linker flags give NetBSD 10 the two PT_LOAD segments its loader
+# insists on?
 #
-# The launcher will not start in the VM -- "Shared object libjli.so not
-# found" -- while the library is sitting in the directory the RPATH names and
-# naming that directory outright does not help either. Each attempt to find
-# out why has cost four cross builds first, so this takes the bundle from a
-# run that already happened and boots nothing but the VM.
+# rtld refuses any shared object without exactly two, and reports the refusal
+# as the file being missing -- see flags-ldflags.m4.  -Wl,-z,noseparate-code
+# alone did not do it, and finding out costs a sixteen-minute build of the
+# whole JDK each time the guess changes.
 #
-# The first pass established that the file is there and is a good amd64 ELF,
-# so rtld is not failing to find it; it is finding it and throwing it away.
-# NetBSD 10's map_object.c refuses any shared object that does not have
-# exactly two PT_LOAD segments, and search.c discards that error and carries
-# on, so a rejected library is reported as a missing one. Ours has four,
-# because lld puts code and rodata in separate segments.
-#
-# rtld only hides the reason while it is searching. Handed a path with a
-# slash in it -- through LD_PRELOAD, or through dlopen -- it loads the file
-# directly and says what it did not like. That is what this asks it.
+# So link one three-line object with the same cross toolchain and print its
+# program headers under each candidate.  The sysroot comes from the cache the
+# real build fills, so this is a couple of minutes.
 #
 name: 'VM probe'
 
@@ -26,60 +19,57 @@ on:
       - vm-probe
 
 jobs:
-  probe:
-    name: probe
+  link:
+    name: link
     runs-on: ubuntu-24.04
     steps:
-      - name: 'Get the bundles from that run'
-        uses: actions/download-artifact@v6
-        with:
-          name: bundles-bsd-x86_64-netbsd
-          path: bundles
-          # The run whose bundles to look at.  A dispatch input would be
-          # tidier, but workflow_dispatch only reaches files that are on the
-          # default branch.
-          run-id: '35023637317'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 'Check out'
+        uses: actions/checkout@v5
 
-      - name: 'Unpack'
+      - name: 'Install the cross compiler'
         run: |
-          mkdir -p jdk
-          tar -xf bundles/jdk-bsd-x86_64-netbsd.tar.gz -C jdk
-          ls -l jdk
+          sudo apt-get update
+          sudo apt-get install clang lld libarchive-tools
 
-      - name: 'Ask rtld for the real reason'
-        uses: vmactions/netbsd-vm@v1.5.0
+      - name: 'Check cache for sysroot'
+        id: get-cached-sysroot
+        uses: actions/cache@v5
         with:
-          release: '10.1'
-          mem: 4096
-          cpu: 2
-          usesh: true
-          copyback: false
-          run: |
-            set -x
-            JDK="$PWD/jdk/`ls jdk`"
+          path: sysroot
+          key: sysroot-netbsd-${{ hashFiles('./.github/scripts/gen-bsd-sysroot.sh') }}
 
-            # How many PT_LOAD on each side?  This system's own libraries
-            # have to satisfy this system's loader, so they are the control.
-            for f in "$JDK/lib/libjli.so" /lib/libc.so.12 /usr/lib/libz.so; do
-                    echo "$f: `readelf -l \"$f\" | grep -c '^  LOAD'` PT_LOAD"
-            done
+      - name: 'Create sysroot'
+        run: bash .github/scripts/gen-bsd-sysroot.sh netbsd sysroot
+        if: steps.get-cached-sysroot.outputs.cache-hit != 'true'
 
-            # LD_PRELOAD takes a path, so rtld loads it directly instead of
-            # searching, and prints what it would otherwise swallow.
-            LD_PRELOAD="$JDK/lib/libjli.so" /usr/bin/true || true
-            LD_PRELOAD=/usr/lib/libz.so /usr/bin/true || true
+      - name: 'Prepare the cross compiler'
+        run: >
+          bash .github/scripts/gen-bsd-crosstool.sh
+          netbsd x86_64-unknown-netbsd "$PWD/sysroot" "$PWD/cross-bin"
 
-            # The same question through dlopen, which hands back the text.
-            cat > /var/tmp/dl.c <<'EOF'
-            #include <dlfcn.h>
-            #include <stdio.h>
-            int main(int argc, char **argv) {
-                    void *h = dlopen(argv[1], RTLD_NOW);
-                    printf("dlopen %s: %s\n", argv[1], h ? "ok" : dlerror());
-                    return 0;
-            }
-            EOF
-            cc -o /var/tmp/dl /var/tmp/dl.c
-            /var/tmp/dl "$JDK/lib/libjli.so"
-            /var/tmp/dl /usr/lib/libz.so
+      - name: 'Count the segments each flag set produces'
+        run: |
+          export PATH="$PWD/cross-bin:$PATH"
+          cat > probe.c <<'EOF'
+          int probe_value = 1;
+          const char probe_text[] = "read only data, to make a rodata section";
+          int probe(void) { return probe_value + (int) probe_text[0]; }
+          EOF
+          try() {
+            name="$1"; shift
+            x86_64-unknown-netbsd-clang -shared -fPIC -o probe.so probe.c "$@" \
+              2> err.txt || { echo "== $name: did not link"; cat err.txt; return; }
+            n=$(readelf -l probe.so | grep -c '^  LOAD')
+            echo "== $name -> $n PT_LOAD"
+            readelf -l probe.so | grep -E '^  (LOAD|GNU_RELRO)' \
+              | sed 's/^/     /'
+          }
+          try 'as we link today'
+          try 'noseparate-code'      -Wl,-z,noseparate-code
+          try 'no-rosegment'         -Wl,--no-rosegment
+          try 'both'                 -Wl,-z,noseparate-code -Wl,--no-rosegment
+          try 'both + norelro'       -Wl,-z,noseparate-code -Wl,--no-rosegment -Wl,-z,norelro
+          try 'norelro alone'        -Wl,-z,norelro
+          echo
+          echo "linker:"
+          x86_64-unknown-netbsd-clang -Wl,--version -shared -fPIC -o /dev/null probe.c 2>&1 | head -3
