@@ -253,8 +253,18 @@ jobs:
               echo "--- tests that errored ---"
               cat $R/test-results/*/text/other_errors.txt 2>/dev/null || :
               echo "--- end ---"
-              exit 1
             fi
+
+            # Deliberately not "exit 1" here.  vmactions copies the workspace
+            # back out of the VM only when the step succeeds, so failing
+            # inside it threw away the files the failure has to be read from:
+            # every red job uploaded an empty artifact,
+            #
+            #   No files were found with the provided path: results
+            #
+            # and the hs_err added for exactly this was never collected once.
+            # The verdict is passed on the runner instead, below, after the
+            # copy back.
         env:
           TEST_SUITE: ${{ matrix.test-suite }}
 
@@ -286,3 +296,23 @@ jobs:
           path: results
           retention-days: 14
         if: always()
+
+      # make writes its verdict to a file rather than an exit status, and the
+      # VM step returns 0 so that file gets carried out.  Read it here.
+      #
+      # Absent results are a failure too.  If the copy back quietly does not
+      # happen, an empty workspace looks exactly like a clean run, which is
+      # the shape of the bug this whole path exists to stop.
+      - name: 'Fail the job when a test failed'
+        run: |
+          R=build/run-test-prebuilt
+          if [ ! -d "$R/test-results" ]; then
+            echo "$R/test-results is not here.  The VM's workspace did not"
+            echo "come back, so nothing can be said about the tests."
+            exit 1
+          fi
+          if [ -f "$R/make-support/exit-with-error" ]; then
+            echo "tests failed -- the names are in the log above, the .jtr"
+            echo "and hs_err files in the results artifact"
+            exit 1
+          fi
