@@ -133,17 +133,23 @@ AC_DEFUN([FLAGS_SETUP_LDFLAGS_HELPER],
   #   if (nsegs != 2) {
   #           _rtld_error("%s: wrong number of segments (%d != 2)", ...
   #
-  # lld splits code from read-only data and emits four, so every library we
-  # build is refused.  The refusal is invisible: the search in rtld's
-  # search.c throws the message away and moves to the next directory, so the
-  # only thing that reaches the terminal is
+  # Both lld and a current GNU ld separate code from read-only data and emit
+  # four, so every library we build is refused.  The refusal is invisible:
+  # the search in rtld's search.c throws the message away and moves to the
+  # next directory, so the only thing that reaches the terminal is
   #
   #   bin/java: Shared object "libjli.so" not found
   #
   # with the file sitting in the directory it just rejected.  NetBSD's own
-  # toolchain does not emit separate code segments, which is why its base
-  # libraries load; asking lld for the same layout is what makes ours load.
+  # toolchain does not separate them, which is why its base libraries load.
   # Later NetBSD dropped the restriction, but the released version has it.
+  #
+  # GNU ld honours this flag and comes down to two while leaving the RELRO
+  # region inside the writable segment.  lld ignores it, and can only reach
+  # two if RELRO is given up as well, because it cuts a segment at the RELRO
+  # boundary -- so a NetBSD cross build wants GNU ld, and does not get to
+  # find that out from an error message.  The load segments are counted
+  # after the build for that reason.
   if test "x$OPENJDK_TARGET_OS_ENV" = xbsd.netbsd; then
     BASIC_LDFLAGS="$BASIC_LDFLAGS -Wl,-z,noseparate-code"
   fi

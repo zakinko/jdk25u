@@ -68,6 +68,16 @@ case "$os" in
     cxx_extra="-stdlib=libstdc++ -isystem $sysroot/usr/include/g++"
     rt_extra="--rtlib=libgcc"
     link_extra="-lgcc"
+    # NetBSD's run-time linker maps a shared object itself, and up to and
+    # including NetBSD 10 it handles exactly two PT_LOAD segments; anything
+    # else it refuses, and reports as the file being missing.  lld emits four
+    # and cannot be talked down to two while RELRO is kept, because it cuts
+    # the writable segment at the RELRO boundary.  GNU ld does not, so with
+    # -z noseparate-code -- which lld silently ignores, and which
+    # flags-ldflags.m4 passes -- it produces the two segments NetBSD wants
+    # and keeps the read-only relocations.  Measured on LLD 18.1.3 and GNU
+    # ld 2.42.
+    linker=bfd
     ;;
   dragonfly)
     cxxdir=$(ls -d "$sysroot"/usr/include/c++/*/ | sort -V | tail -1)
@@ -94,6 +104,7 @@ case "$os" in
     ;;
 esac
 : "${common_extra:=}"
+: "${linker:=lld}"
 
 for tool in clang clang++; do
   case "$tool" in
@@ -107,7 +118,7 @@ for tool in clang clang++; do
 # with warnings as errors.
 exec /usr/bin/$tool --target=$triple --sysroot=$sysroot \\
   -Wno-unused-command-line-argument \\
-  $rt_extra -fuse-ld=lld $common_extra $extra \\
+  $rt_extra -fuse-ld=$linker $common_extra $extra \\
   -include $fixups "\$@" $link_extra
 W
   chmod +x "$bindir/$triple-$tool"
