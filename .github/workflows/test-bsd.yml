@@ -170,6 +170,29 @@ jobs:
               JDK_IMAGE_DIR="$JDK" \
               TEST_IMAGE_DIR="$TESTS" \
               JTREG='JAVA_OPTIONS=-XX:-CreateCoredumpOnCrash;VERBOSE=fail,error,time;KEYWORDS=!headful'
+
+            # make test-prebuilt prints "TEST FAILURE" and then returns 0.  It
+            # reports the failure as a file, not as an exit status:
+            #
+            #   build/run-test-prebuilt/make-support/exit-with-error
+            #
+            # Upstream's test.yml reads that file in gen-test-summary.sh, puts
+            # failure=true into GITHUB_OUTPUT, and a later step calls
+            # core.setFailed().  None of it reaches here, because make runs
+            # inside the VM and the runner never sees its output file.  So this
+            # job stayed green through a run with 15 failing tests, and the
+            # only way to know was to read the log.
+            #
+            # Read the file where make wrote it.
+            R=build/run-test-prebuilt
+            if [ -f $R/make-support/exit-with-error ]; then
+              echo "--- tests that failed ---"
+              cat $R/test-results/*/text/newfailures.txt 2>/dev/null || :
+              echo "--- tests that errored ---"
+              cat $R/test-results/*/text/other_errors.txt 2>/dev/null || :
+              echo "--- end ---"
+              exit 1
+            fi
         env:
           TEST_SUITE: ${{ matrix.test-suite }}
 
