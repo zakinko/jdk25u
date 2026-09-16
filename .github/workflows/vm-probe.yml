@@ -72,7 +72,11 @@ jobs:
           # it and still lays out two segments, so ask GNU ld -- the host's
           # will do, the object format is the same -- whether it can here too.
           try 'GNU ld'               -fuse-ld=bfd
-          try 'GNU ld + relro,now'   -fuse-ld=bfd -Wl,-z,relro -Wl,-z,now
+          try 'GNU ld + noseparate'  -fuse-ld=bfd -Wl,-z,noseparate-code
+          try 'GNU ld + nosep+relro' -fuse-ld=bfd -Wl,-z,noseparate-code -Wl,-z,relro -Wl,-z,now
+          # lld splits the writable segment at the RELRO boundary and GNU ld
+          # does not, so if anything can give two segments and keep RELRO it
+          # is this pair.
           echo
           echo "== what the object says it is, as linked today"
           x86_64-unknown-netbsd-clang -shared -fPIC -o probe.so probe.c
