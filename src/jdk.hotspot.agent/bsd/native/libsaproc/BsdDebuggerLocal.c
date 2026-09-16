@@ -46,8 +46,9 @@
  * out of the target, exactly as Linux's symtab.c does: the tables are not
  * loaded at run time, so the target has no copy to read.
  *
- * Only the live-process case is handled.  Core files go through the
- * shared elf reader, which needs no per-OS code, and are left for later.
+ * Core files go through the shared elf reader, which needs no per-OS code,
+ * except for the threads: those sit in per-LWP notes whose name and type are
+ * the system's own, so parse_core_notes() reads them here.
  */
 
 #include <jni.h>
@@ -1139,6 +1140,41 @@ static void publish_load_objects(JNIEnv* env, jobject this_obj,
  * Registers are not collected here: getThreadIntegerRegisterSet0() asks for
  * them by LWP id when a caller wants them.
  */
+/*
+ * Hands the debugger the threads a core carries.
+ *
+ * parse_core_notes() has already picked them out of the notes, but only into
+ * ph->threads, which is what getThreadIntegerRegisterSet0() reads.  The Java
+ * side keeps a list of its own, and nothing was filling it for a core, so
+ * clhsdb's pstack walked an empty list: it printed the deadlock header and
+ * then stopped, which reads as "this core has no threads" rather than as a
+ * gap here.  The live path has done this all along, in add_live_thread().
+ *
+ * The id handed over is the LWP id, which is what the note is named after and
+ * what OSThread::_unique_thread_id holds on the BSDs other than macOS.  The
+ * proxies JavaThread builds carry the same number, so the two sides match and
+ * pstack can put a thread's name against its stack.
+ */
+static void publish_core_threads(JNIEnv* env, jobject this_obj,
+                                 struct ps_prochandle* ph) {
+  thread_info* t;
+
+  for (t = ph->threads; t != NULL; t = t->next) {
+    jobject thread;
+    jobject threads;
+
+    thread = (*env)->CallObjectMethod(env, this_obj, getThreadForThreadId_ID,
+                                      (jlong)t->lwpid);
+    CHECK_EXCEPTION;
+    threads = (*env)->GetObjectField(env, this_obj, threadList_ID);
+    CHECK_EXCEPTION;
+    (*env)->CallBooleanMethod(env, threads, listAdd_ID, thread);
+    CHECK_EXCEPTION;
+    (*env)->DeleteLocalRef(env, thread);
+    (*env)->DeleteLocalRef(env, threads);
+  }
+}
+
 static void add_live_thread(JNIEnv* env, jobject this_obj,
                             struct ps_prochandle* ph, sa_lwpid_t lwpid) {
   thread_info* t;
@@ -1375,6 +1411,7 @@ Java_sun_jvm_hotspot_debugger_bsd_BsdDebuggerLocal_attach0__Ljava_lang_String_2L
   (*env)->SetLongField(env, this_obj, p_ps_prochandle_ID, (jlong)(intptr_t)ph);
 
   publish_load_objects(env, this_obj, ph);
+  publish_core_threads(env, this_obj, ph);
 }
 
 /*
