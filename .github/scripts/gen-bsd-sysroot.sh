@@ -63,9 +63,10 @@ case "$os" in
     #
     #   Undefined PLT symbol "__libc_thr_attr_destroy" (symnum = 21)
     #
-    # 10 is also as far back as this source builds -- a 9.4 sysroot stops in
-    # os_posix.cpp, where PTHREAD_STACK_MIN is undeclared until 10 -- and it
-    # is the version vmactions offers, so it is what gets tested.
+    # 10 is also as far back as this source builds: a 9.4 sysroot stops in
+    # os_posix.cpp, where PTHREAD_STACK_MIN is undeclared until 10.  Which
+    # release the tests then run in is a separate choice, made in
+    # test-bsd.yml; what is built against 10.1 runs on 11 as well.
     netbsd_release=10.1
     base=https://cdn.netbsd.org/pub/NetBSD/NetBSD-$netbsd_release/amd64/binary/sets
     for set in base comp; do
