@@ -65,11 +65,23 @@ jobs:
               | sed 's/^/     /'
           }
           try 'as we link today'
-          try 'noseparate-code'      -Wl,-z,noseparate-code
           try 'no-rosegment'         -Wl,--no-rosegment
-          try 'both'                 -Wl,-z,noseparate-code -Wl,--no-rosegment
-          try 'both + norelro'       -Wl,-z,noseparate-code -Wl,--no-rosegment -Wl,-z,norelro
           try 'norelro alone'        -Wl,-z,norelro
+          try 'no-rosegment+norelro' -Wl,--no-rosegment -Wl,-z,norelro
+          # lld reaches two only by giving up RELRO. NetBSD's own linker keeps
+          # it and still lays out two segments, so ask GNU ld -- the host's
+          # will do, the object format is the same -- whether it can here too.
+          try 'GNU ld'               -fuse-ld=bfd
+          try 'GNU ld + relro,now'   -fuse-ld=bfd -Wl,-z,relro -Wl,-z,now
           echo
-          echo "linker:"
-          x86_64-unknown-netbsd-clang -Wl,--version -shared -fPIC -o /dev/null probe.c 2>&1 | head -3
+          echo "== what the object says it is, as linked today"
+          x86_64-unknown-netbsd-clang -shared -fPIC -o probe.so probe.c
+          readelf -n probe.so | grep -A2 -i netbsd || echo "  (no NetBSD note)"
+          echo "== and with GNU ld"
+          if x86_64-unknown-netbsd-clang -shared -fPIC -fuse-ld=bfd -o probe-bfd.so probe.c 2>/dev/null; then
+            readelf -n probe-bfd.so | grep -A2 -i netbsd || echo "  (no NetBSD note)"
+          fi
+          echo
+          echo "linkers available:"
+          x86_64-unknown-netbsd-clang -Wl,--version -shared -fPIC -o /dev/null probe.c 2>&1 | head -2
+          ld.bfd --version 2>&1 | head -1
