@@ -38,7 +38,7 @@ on:
       tests:
         description: 'Tests to run'
         required: false
-        default: 'test/jdk/java/foreign/LibraryLookupTest.java test/hotspot/jtreg/runtime/ErrorHandling/SafeFetchInErrorHandlingTest.java'
+        default: 'test/jdk/java/foreign/LibraryLookupTest.java'
       release:
         description: 'NetBSD release to reproduce on'
         required: false
@@ -91,16 +91,28 @@ jobs:
           ls bundles/jdk
           ls jtreg/installed | head
 
-      # SafeFetch is HotSpot's deliberate faulting read: the load traps and
-      # the signal handler puts the pc on _SafeFetch32_fault.  The core says
-      # the fatal SIGILL is at that very label, reached from
-      # os::is_readable_pointer while the error reporter walks the stack --
-      # so the question is whether the recovery works on this port at all.
-      # The test for it is not in any tier, hence running it here.
+          # Without these gdb says only "Shared library is missing debugging
+          # information" and names the nearest preceding symbol, which is how
+          # a stub address came back as _SafeFetch32_fault.  The symbols
+          # bundle mirrors the image, so laying it over the tree puts each
+          # .debuginfo beside the library it belongs to.
+          echo "--- symbols ---"
+          find bundles/symbols -name '*.debuginfo' | head -5
+          find bundles/symbols -name '*.debuginfo' | wc -l
+          ( cd "bundles/symbols/$(ls bundles/symbols | head -1)" 2>/dev/null &&
+            find . -name '*.debuginfo' -print0 |
+            cpio -0pdum "$GITHUB_WORKSPACE/bundles/jdk/$(ls "$GITHUB_WORKSPACE/bundles/jdk")" ) || \
+            echo "could not lay the symbols over the image; gdb will be vaguer"
+
+      # SafeFetchInErrorHandlingTest would be the test for the reading the
+      # first core suggested -- a fatal SIGILL inside HotSpot's own faulting
+      # read -- but it asks for @requires vm.debug and these bundles are a
+      # release build, so it selects nothing.  Measuring that needs a
+      # fastdebug build, not this probe.
       - name: 'Reproduce it and read the core'
         uses: vmactions/netbsd-vm@v1.5.0
         env:
-          TESTS_TO_RUN: ${{ inputs.tests || 'test/jdk/java/foreign/LibraryLookupTest.java test/hotspot/jtreg/runtime/ErrorHandling/SafeFetchInErrorHandlingTest.java' }}
+          TESTS_TO_RUN: ${{ inputs.tests || 'test/jdk/java/foreign/LibraryLookupTest.java' }}
         with:
           release: ${{ inputs.release || '10.1' }}
           mem: 6144
@@ -170,8 +182,10 @@ jobs:
 
             for c in `grep -v hs_err found.txt || :`; do
               echo "=== gdb on $c ==="
-              gdb -batch -ex 'bt 40' -ex 'info sharedlibrary' \
-                  "$JDK/bin/java" "$c" 2>&1 | head -90
+              gdb -batch \
+                  -ex 'set debug-file-directory /usr/lib/debug' \
+                  -ex 'bt 25' -ex 'info threads' -ex 'thread apply all bt 6' \
+                  "$JDK/bin/java" "$c" 2>&1 | head -140
               echo "=== jhsdb on $c ==="
               "$JDK/bin/jhsdb" jstack --exe "$JDK/bin/java" --core "$c" 2>&1 | head -60
             done
