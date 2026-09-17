@@ -1,0 +1,167 @@
+#
+# What does java/foreign/LibraryLookupTest crash on, on NetBSD 10?
+#
+# It dies in testLoadLibraryShared, where many threads dlopen and dlclose the
+# same library at once.  The .jtr cannot say where, because several threads
+# fault at the same moment and the error reporter is caught in it too:
+#
+#   # Problematic frame:
+#   # [thread 13986 also had an error]
+#   [thread 12320 also had an error]
+#
+# The output stops there -- no "error report file ... is saved as" line, so no
+# hs_err was written at all.  A core is the only thing left to read, and tier1
+# runs with -XX:-CreateCoredumpOnCrash.
+#
+# So: that one test, cores enabled, and gdb and jhsdb pointed at what falls
+# out.  The test passes on NetBSD 11, so this is about 10's ld.elf_so rather
+# than about the port.
+#
+# Fork-only, and on a branch of its own so it neither triggers nor cancels the
+# tier1 workflow.  The bundles come from a finished run instead of being built
+# again, which keeps this to minutes; they are the same artifacts tier1 ran
+# against, so a crash here is that crash.
+#
+name: 'Core probe'
+
+on:
+  push:
+    branches:
+      - pr/core-probe
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: 'Run to take the NetBSD bundles from'
+        required: false
+        default: '35177960307'
+      release:
+        description: 'NetBSD release to reproduce on'
+        required: false
+        default: '10.1'
+
+concurrency:
+  group: core-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PLATFORM: bsd-x86_64-netbsd
+  RUN_ID: ${{ inputs.run-id || '35177960307' }}
+
+jobs:
+  probe:
+    name: probe
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: 'Checkout the JDK source'
+        uses: actions/checkout@v5
+
+      - name: 'Download the bundles from that run'
+        uses: actions/download-artifact@v8
+        with:
+          name: bundles-bsd-x86_64-netbsd
+          path: bundles
+          run-id: ${{ inputs.run-id || '35177960307' }}
+          github-token: ${{ github.token }}
+
+      - name: 'Download JTReg from that run'
+        uses: actions/download-artifact@v8
+        with:
+          pattern: bundles-jtreg-*
+          merge-multiple: true
+          path: jtreg/installed
+          run-id: ${{ inputs.run-id || '35177960307' }}
+          github-token: ${{ github.token }}
+
+      # Same names and the same layout get-bundles produces, so the paths
+      # below match what test-bsd.yml hands the virtual machine.
+      - name: 'Unpack'
+        run: |
+          mkdir -p bundles/jdk bundles/tests bundles/symbols
+          tar -xf "bundles/jdk-$PLATFORM.tar.gz" -C bundles/jdk
+          tar -xf "bundles/tests-$PLATFORM.tar.gz" -C bundles/tests
+          if [ -e "bundles/symbols-$PLATFORM.tar.gz" ]; then
+            tar -xf "bundles/symbols-$PLATFORM.tar.gz" -C bundles/symbols
+          fi
+          ls bundles/jdk
+          ls jtreg/installed | head
+
+      - name: 'Reproduce it and read the core'
+        uses: vmactions/netbsd-vm@v1.5.0
+        with:
+          release: ${{ inputs.release || '10.1' }}
+          mem: 6144
+          cpu: 4
+          usesh: true
+          copyback: true
+          prepare: |
+            /usr/sbin/pkg_add bash gmake
+          run: |
+            set -e
+            export PATH=/usr/pkg/bin:/usr/pkg/sbin:$PATH
+            JDK="$PWD/bundles/jdk/`ls bundles/jdk`"
+            TESTS="$PWD/bundles/tests"
+            JT="$PWD/jtreg/installed"
+
+            # Cross-built binaries carry no PaX mark, and every launcher dies
+            # in VM initialisation without one.
+            find "$JDK" "$TESTS" -type f \( -perm -u+x -o -name '*.so' \) -print |
+              while read f; do /usr/sbin/paxctl +m "$f" >/dev/null 2>&1 || :; done
+
+            echo "--- the machine ---"
+            uname -a
+            "$JDK/bin/java" -version
+
+            # The image's default core limit is 0, so without this the crash
+            # leaves nothing at all -- which is how we got here.
+            ulimit -c unlimited
+            ulimit -c
+            /sbin/sysctl kern.defcorename 2>/dev/null || :
+
+            echo "--- the one test, cores on ---"
+            "$JT/bin/jtreg" \
+              -jdk:"$JDK" \
+              -nativepath:"$TESTS/jdk/jtreg/native" \
+              -vmoption:-XX:+CreateCoredumpOnCrash \
+              -retain:all -verbose:all \
+              -w jtwork -r jtreport \
+              test/jdk/java/foreign/LibraryLookupTest.java || :
+
+            echo "--- what was left behind ---"
+            find jtwork -type f \( -name '*.core' -o -name 'core' \
+                 -o -name 'hs_err_pid*.log' \) -print > found.txt || :
+            cat found.txt
+
+            for h in `grep hs_err found.txt || :`; do
+              echo "=== $h ==="
+              sed -n '1,90p' "$h"
+            done
+
+            for c in `grep -v hs_err found.txt || :`; do
+              echo "=== gdb on $c ==="
+              gdb -batch -ex 'bt 40' -ex 'info sharedlibrary' \
+                  "$JDK/bin/java" "$c" 2>&1 | head -90
+              echo "=== jhsdb on $c ==="
+              "$JDK/bin/jhsdb" jstack --exe "$JDK/bin/java" --core "$c" 2>&1 | head -60
+            done
+
+            if [ ! -s found.txt ]; then
+              echo "nothing was left behind -- either the test passed here or"
+              echo "the core limit did not take"
+            fi
+
+      - name: 'Package what came back'
+        run: |
+          mkdir -p out
+          find jtwork -type f \( -name '*.jtr' -o -name 'hs_err_pid*.log' \) 2>/dev/null |
+            while read f; do d="out/$(dirname "$f")"; mkdir -p "$d"; cp "$f" "$d/"; done
+          du -sh out 2>/dev/null || :
+        if: always()
+
+      - name: 'Upload'
+        uses: actions/upload-artifact@v6
+        with:
+          name: core-probe
+          path: out
+          retention-days: 7
+        if: always()
