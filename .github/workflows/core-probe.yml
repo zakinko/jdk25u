@@ -13,9 +13,10 @@
 # hs_err was written at all.  A core is the only thing left to read, and tier1
 # runs with -XX:-CreateCoredumpOnCrash.
 #
-# So: that one test, cores enabled, and gdb and jhsdb pointed at what falls
-# out.  The test passes on NetBSD 11, so this is about 10's ld.elf_so rather
-# than about the port.
+# So: that test, cores enabled, and gdb and jhsdb pointed at what falls out.
+# It passes on NetBSD 11, which pointed at 10's ld.elf_so -- but the core says
+# the fatal signal is inside HotSpot's own SafeFetch recovery, so that reading
+# is no longer safe and SafeFetch is measured here too.
 #
 # Fork-only, and on a branch of its own so it neither triggers nor cancels the
 # tier1 workflow.  The bundles come from a finished run instead of being built
@@ -34,6 +35,10 @@ on:
         description: 'Run to take the NetBSD bundles from'
         required: false
         default: '35177960307'
+      tests:
+        description: 'Tests to run'
+        required: false
+        default: 'test/jdk/java/foreign/LibraryLookupTest.java test/hotspot/jtreg/runtime/ErrorHandling/SafeFetchInErrorHandlingTest.java'
       release:
         description: 'NetBSD release to reproduce on'
         required: false
@@ -86,14 +91,23 @@ jobs:
           ls bundles/jdk
           ls jtreg/installed | head
 
+      # SafeFetch is HotSpot's deliberate faulting read: the load traps and
+      # the signal handler puts the pc on _SafeFetch32_fault.  The core says
+      # the fatal SIGILL is at that very label, reached from
+      # os::is_readable_pointer while the error reporter walks the stack --
+      # so the question is whether the recovery works on this port at all.
+      # The test for it is not in any tier, hence running it here.
       - name: 'Reproduce it and read the core'
         uses: vmactions/netbsd-vm@v1.5.0
+        env:
+          TESTS_TO_RUN: ${{ inputs.tests || 'test/jdk/java/foreign/LibraryLookupTest.java test/hotspot/jtreg/runtime/ErrorHandling/SafeFetchInErrorHandlingTest.java' }}
         with:
           release: ${{ inputs.release || '10.1' }}
           mem: 6144
           cpu: 4
           usesh: true
           copyback: true
+          envs: 'TESTS_TO_RUN'
           prepare: |
             /usr/sbin/pkg_add bash gmake
           run: |
@@ -123,14 +137,14 @@ jobs:
             # this because make starts jtreg as java -jar.
             chmod +x "$JT"/bin/* 2>/dev/null || :
 
-            echo "--- the one test, cores on ---"
+            echo "--- running $TESTS_TO_RUN, cores on ---"
             "$JT/bin/jtreg" \
               -jdk:"$JDK" \
               -nativepath:"$TESTS/jdk/jtreg/native" \
               -vmoption:-XX:+CreateCoredumpOnCrash \
               -retain:all -verbose:all \
               -w jtwork -r jtreport \
-              test/jdk/java/foreign/LibraryLookupTest.java || :
+              $TESTS_TO_RUN || :
 
             # The first attempt returned green having run nothing at all --
             # jtreg would not start and the "|| :" swallowed it.  A probe that
