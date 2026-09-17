@@ -137,22 +137,26 @@ jobs:
             # this because make starts jtreg as java -jar.
             chmod +x "$JT"/bin/* 2>/dev/null || :
 
-            echo "--- running $TESTS_TO_RUN, cores on ---"
-            "$JT/bin/jtreg" \
-              -jdk:"$JDK" \
-              -nativepath:"$TESTS/jdk/jtreg/native" \
-              -vmoption:-XX:+CreateCoredumpOnCrash \
-              -retain:all -verbose:all \
-              -w jtwork -r jtreport \
-              $TESTS_TO_RUN || :
-
-            # The first attempt returned green having run nothing at all --
-            # jtreg would not start and the "|| :" swallowed it.  A probe that
-            # measures nothing has to say so.
-            if [ ! -d jtwork ] || ! find jtwork -name '*.jtr' | grep -q .; then
-              echo "jtreg produced no .jtr: the test never ran"
-              exit 1
-            fi
+            # One jtreg run per test, because a single run given paths under
+            # both test/jdk and test/hotspot/jtreg quietly kept only the
+            # first suite: the SafeFetch test was asked for and never ran,
+            # with no message saying so.
+            n=0
+            for t in $TESTS_TO_RUN; do
+              n=`expr $n + 1`
+              echo "--- running $t, cores on ---"
+              "$JT/bin/jtreg" \
+                -jdk:"$JDK" \
+                -nativepath:"$TESTS/jdk/jtreg/native" \
+                -vmoption:-XX:+CreateCoredumpOnCrash \
+                -retain:all -verbose:all \
+                -w "jtwork/$n" -r "jtreport/$n" \
+                "$t" || :
+              if ! find "jtwork/$n" -name '*.jtr' 2>/dev/null | grep -q .; then
+                echo "no .jtr under jtwork/$n: $t never ran"
+                exit 1
+              fi
+            done
 
             echo "--- what was left behind ---"
             find jtwork -type f \( -name '*.core' -o -name 'core' \
