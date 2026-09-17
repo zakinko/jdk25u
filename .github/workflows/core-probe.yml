@@ -118,6 +118,11 @@ jobs:
             ulimit -c
             /sbin/sysctl kern.defcorename 2>/dev/null || :
 
+            # Downloading an artifact drops the executable bit, so the script
+            # in jtreg/bin cannot be run as it arrives.  tier1 does not hit
+            # this because make starts jtreg as java -jar.
+            chmod +x "$JT"/bin/* 2>/dev/null || :
+
             echo "--- the one test, cores on ---"
             "$JT/bin/jtreg" \
               -jdk:"$JDK" \
@@ -126,6 +131,14 @@ jobs:
               -retain:all -verbose:all \
               -w jtwork -r jtreport \
               test/jdk/java/foreign/LibraryLookupTest.java || :
+
+            # The first attempt returned green having run nothing at all --
+            # jtreg would not start and the "|| :" swallowed it.  A probe that
+            # measures nothing has to say so.
+            if [ ! -d jtwork ] || ! find jtwork -name '*.jtr' | grep -q .; then
+              echo "jtreg produced no .jtr: the test never ran"
+              exit 1
+            fi
 
             echo "--- what was left behind ---"
             find jtwork -type f \( -name '*.core' -o -name 'core' \
