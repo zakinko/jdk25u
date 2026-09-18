@@ -1,0 +1,66 @@
+#
+# Does NetBSD 10 fault when threads dlopen and dlclose the same object?
+#
+# A JDK test (java/foreign/LibraryLookupTest) crashes there and passes on 11.
+# Its hs_err says SEGV_MAPERR with the pc in memory no object is mapped at any
+# more, inside RawNativeLibraries.load0 -- that is, in dlopen.  -current fixed
+# a series of races in this area in 2026 ("Resolve several races in
+# dlopen/dlclose", "Fix more races with recursive threaded dlopen/dlclose")
+# and netbsd-10 has not had them pulled up.
+#
+# A JDK is no way to report that, so this is the same thing in ninety lines of
+# C.  Run on both releases: the point is the difference between them.
+#
+name: 'rtld probe'
+
+on:
+  push:
+    branches:
+      - pr/rtld-probe
+  workflow_dispatch:
+    inputs:
+      threads:
+        required: false
+        default: '8'
+      iterations:
+        required: false
+        default: '2000'
+
+concurrency:
+  group: rtld-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: ${{ matrix.release }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ['10.0', '10.1', '11.0']
+
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@v5
+
+      - name: 'Run it'
+        uses: vmactions/netbsd-vm@v1.5.0
+        with:
+          release: ${{ matrix.release }}
+          mem: 4096
+          cpu: 4
+          usesh: true
+          copyback: false
+          envs: 'THREADS ITERS'
+          run: |
+            set -e
+            cd .github/probes/rtld
+            echo "--- `uname -srm` ---"
+            cc -O2 -fPIC -shared -o dso.so dso.c
+            cc -O2 -o probe probe.c -lpthread
+            # The probe returns non-zero on a failed dlopen/dlclose and dies
+            # outright on a fault, so let the step carry that through.
+            ./probe "$PWD/dso.so" "$THREADS" "$ITERS"
+        env:
+          THREADS: ${{ inputs.threads || '8' }}
+          ITERS: ${{ inputs.iterations || '2000' }}
