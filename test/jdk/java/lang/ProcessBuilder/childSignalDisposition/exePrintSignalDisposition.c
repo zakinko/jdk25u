@@ -76,7 +76,13 @@ int main(int argc, char** argv) {
         } else {
             printf("%p ", handler);
         }
-#ifdef _AIX
+#if defined(_AIX) || defined(__NetBSD__) || defined(__FreeBSD__) || \
+    defined(__DragonFly__)
+        // sigset_t is a struct here, as it is on AIX, so there is nothing for
+        // %X to print -- passing it is undefined, and the compiler says so
+        // once warnings are errors.  The mask is not read by anything: the
+        // test matches on the disposition word alone.  OpenBSD and macOS keep
+        // the mask, where sigset_t is still an integer.
         printf("%X\n", act.sa_flags);
 #else
         printf("%X %X\n", act.sa_flags, act.sa_mask);

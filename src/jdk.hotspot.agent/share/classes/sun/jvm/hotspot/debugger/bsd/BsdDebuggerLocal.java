@@ -410,7 +410,27 @@ public class BsdDebuggerLocal extends DebuggerBase implements BsdDebugger {
 
     @Override
     public ThreadProxy getThreadForIdentifierAddress(Address addr) {
-        throw new RuntimeException("unimplemented");
+        // The debug server has only this one address to pass on -- the
+        // interface it reaches us through carries a single identifier --
+        // while a BSD thread proxy is built from two: the OSThread's
+        // _thread_id and its _unique_thread_id.  Leaving this unimplemented
+        // made every tool that reaches a VM through the server print
+        //
+        //   Error occurred during stack walking:
+        //   java.lang.RuntimeException: unimplemented
+        //
+        // once per thread, in place of a stack.
+        //
+        // On the BSDs other than macOS the two numbers are the same one: the
+        // port sets _unique_thread_id to os::current_thread_id(), which is
+        // the lwp id _thread_id already holds, so reading the id here builds
+        // the same proxy the local path builds.  macOS keeps a mach thread id
+        // there instead; guessing it would hand back some other thread's
+        // registers, so that stays an error rather than a wrong answer.
+        if (isDarwin) {
+            throw new RuntimeException("unimplemented");
+        }
+        return new BsdThread(this, addr.getCIntegerAt(0, 4, true));
     }
 
     /** From the ThreadAccess interface via Debugger and JVMDebugger */

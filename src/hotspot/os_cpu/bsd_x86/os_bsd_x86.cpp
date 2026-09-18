@@ -348,10 +348,18 @@ frame os::fetch_frame_from_context(const void* ucVoid) {
 
 frame os::fetch_compiled_frame_from_context(const void* ucVoid) {
   const ucontext_t* uc = (const ucontext_t*)ucVoid;
-  frame fr = os::fetch_frame_from_context(uc);
+  // Read sp and fp straight out of the context.  Going through
+  // os::fetch_frame_from_context(uc) instead recurses without end: that
+  // function calls this one whenever the pc it finds is unreadable, which
+  // is exactly the case this one exists to recover from, and it hands over
+  // the same context, so the two call each other until the stack is gone.
+  // The error reporter reaches here on any crash with a bad pc, so the
+  // report is lost along with the thread.
+  intptr_t* fp = os::Bsd::ucontext_get_fp(uc);
+  intptr_t* sp = os::Bsd::ucontext_get_sp(uc);
   // in compiled code, the stack banging is performed just after the return pc
   // has been pushed on the stack
-  return frame(fr.sp() + 1, fr.fp(), (address)*(fr.sp()));
+  return frame(sp + 1, fp, (address)*sp);
 }
 
 intptr_t* os::fetch_bcp_from_context(const void* ucVoid) {

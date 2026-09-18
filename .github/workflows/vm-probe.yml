@@ -1,0 +1,91 @@
+#
+# Which linker flags give NetBSD 10 the two PT_LOAD segments its loader
+# insists on?
+#
+# rtld refuses any shared object without exactly two, and reports the refusal
+# as the file being missing -- see flags-ldflags.m4.  -Wl,-z,noseparate-code
+# alone did not do it, and finding out costs a sixteen-minute build of the
+# whole JDK each time the guess changes.
+#
+# So link one three-line object with the same cross toolchain and print its
+# program headers under each candidate.  The sysroot comes from the cache the
+# real build fills, so this is a couple of minutes.
+#
+name: 'VM probe'
+
+on:
+  push:
+    branches:
+      - vm-probe
+
+jobs:
+  link:
+    name: link
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 'Check out'
+        uses: actions/checkout@v5
+
+      - name: 'Install the cross compiler'
+        run: |
+          sudo apt-get update
+          sudo apt-get install clang lld libarchive-tools
+
+      - name: 'Check cache for sysroot'
+        id: get-cached-sysroot
+        uses: actions/cache@v5
+        with:
+          path: sysroot
+          key: sysroot-netbsd-${{ hashFiles('./.github/scripts/gen-bsd-sysroot.sh') }}
+
+      - name: 'Create sysroot'
+        run: bash .github/scripts/gen-bsd-sysroot.sh netbsd sysroot
+        if: steps.get-cached-sysroot.outputs.cache-hit != 'true'
+
+      - name: 'Prepare the cross compiler'
+        run: >
+          bash .github/scripts/gen-bsd-crosstool.sh
+          netbsd x86_64-unknown-netbsd "$PWD/sysroot" "$PWD/cross-bin"
+
+      - name: 'Count the segments each flag set produces'
+        run: |
+          export PATH="$PWD/cross-bin:$PATH"
+          cat > probe.c <<'EOF'
+          int probe_value = 1;
+          const char probe_text[] = "read only data, to make a rodata section";
+          int probe(void) { return probe_value + (int) probe_text[0]; }
+          EOF
+          try() {
+            name="$1"; shift
+            x86_64-unknown-netbsd-clang -shared -fPIC -o probe.so probe.c "$@" \
+              2> err.txt || { echo "== $name: did not link"; cat err.txt; return; }
+            n=$(readelf -l probe.so | grep -c '^  LOAD')
+            echo "== $name -> $n PT_LOAD"
+            readelf -l probe.so | grep -E '^  (LOAD|GNU_RELRO)' \
+              | sed 's/^/     /'
+          }
+          try 'as we link today'
+          try 'no-rosegment'         -Wl,--no-rosegment
+          try 'norelro alone'        -Wl,-z,norelro
+          try 'no-rosegment+norelro' -Wl,--no-rosegment -Wl,-z,norelro
+          # lld reaches two only by giving up RELRO. NetBSD's own linker keeps
+          # it and still lays out two segments, so ask GNU ld -- the host's
+          # will do, the object format is the same -- whether it can here too.
+          try 'GNU ld'               -fuse-ld=bfd
+          try 'GNU ld + noseparate'  -fuse-ld=bfd -Wl,-z,noseparate-code
+          try 'GNU ld + nosep+relro' -fuse-ld=bfd -Wl,-z,noseparate-code -Wl,-z,relro -Wl,-z,now
+          # lld splits the writable segment at the RELRO boundary and GNU ld
+          # does not, so if anything can give two segments and keep RELRO it
+          # is this pair.
+          echo
+          echo "== what the object says it is, as linked today"
+          x86_64-unknown-netbsd-clang -shared -fPIC -o probe.so probe.c
+          readelf -n probe.so | grep -A2 -i netbsd || echo "  (no NetBSD note)"
+          echo "== and with GNU ld"
+          if x86_64-unknown-netbsd-clang -shared -fPIC -fuse-ld=bfd -o probe-bfd.so probe.c 2>/dev/null; then
+            readelf -n probe-bfd.so | grep -A2 -i netbsd || echo "  (no NetBSD note)"
+          fi
+          echo
+          echo "linkers available:"
+          x86_64-unknown-netbsd-clang -Wl,--version -shared -fPIC -o /dev/null probe.c 2>&1 | head -2
+          ld.bfd --version 2>&1 | head -1

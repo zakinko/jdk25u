@@ -55,9 +55,22 @@ case "$os" in
   netbsd)
     # comp holds the headers and the static libraries.  The X11 sets are not
     # fetched: the build is headless, see below.
-    # A JDK built against an older release still runs on the newer ones, so a
-    # bootstrap kit meant for pkgsrc wants the oldest release it must serve.
-    base=https://cdn.netbsd.org/pub/NetBSD/NetBSD-${NETBSD_SETS_VERSION:-11.0}/amd64/binary/sets
+    #
+    # Build against the released version, not the newest.  NetBSD 11's
+    # <pthread.h> resolves pthread_attr_destroy to __libc_thr_attr_destroy,
+    # a symbol NetBSD 10 does not export, so a JDK built against 11 dies on
+    # 10 the moment the launcher dlopens libjvm.so:
+    #
+    #   Undefined PLT symbol "__libc_thr_attr_destroy" (symnum = 21)
+    #
+    # 10 is also as far back as this source builds: a 9.4 sysroot stops in
+    # os_posix.cpp, where PTHREAD_STACK_MIN is undeclared until 10.  Which
+    # release the tests then run in is a separate choice, made in
+    # test-bsd.yml; what is built against 10.1 runs on 11 as well.  The same
+    # reasoning decides what a bootstrap kit is built against, so the kit
+    # workflow sets NETBSD_SETS_VERSION rather than picking its own rule.
+    netbsd_release=${NETBSD_SETS_VERSION:-10.1}
+    base=https://cdn.netbsd.org/pub/NetBSD/NetBSD-$netbsd_release/amd64/binary/sets
     for set in base comp; do
       fetch "$set.tar.xz" "$base/$set.tar.xz"
       extract "$set.tar.xz"

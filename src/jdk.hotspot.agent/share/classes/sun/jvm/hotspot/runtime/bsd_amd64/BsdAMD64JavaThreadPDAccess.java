@@ -137,7 +137,22 @@ public class BsdAMD64JavaThreadPDAccess implements JavaThreadPDAccess {
     Address threadIdAddr = osThreadAddr.addOffsetTo(osThreadThreadIDField.getOffset());
     Address uniqueThreadIdAddr = osThreadAddr.addOffsetTo(osThreadUniqueThreadIDField.getOffset());
 
-    BsdDebuggerLocal debugger = (BsdDebuggerLocal) VM.getVM().getDebugger();
-    return debugger.getThreadForIdentifierAddress(threadIdAddr, uniqueThreadIdAddr);
+    // Only the local debugger takes both addresses; the two-argument form is
+    // this port's own, because a BSD thread is identified by two numbers.
+    // Casting to it outright breaks every tool that reaches the VM through
+    // the debug server, which hands out a RemoteDebuggerClient instead:
+    //
+    //   java.lang.ClassCastException: class ...RemoteDebuggerClient cannot be
+    //   cast to class ...BsdDebuggerLocal
+    //
+    // and the tool reports "Error occurred during stack walking" for every
+    // thread.  Linux never hit this because it asks through the interface.
+    // The remote side builds its thread wrappers per CPU rather than per OS,
+    // so the one-argument form serves there.
+    JVMDebugger debugger = VM.getVM().getDebugger();
+    if (debugger instanceof BsdDebuggerLocal local) {
+      return local.getThreadForIdentifierAddress(threadIdAddr, uniqueThreadIdAddr);
+    }
+    return debugger.getThreadForIdentifierAddress(threadIdAddr);
   }
 }

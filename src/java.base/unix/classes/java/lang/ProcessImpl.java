@@ -115,7 +115,11 @@ final class ProcessImpl extends Process {
                     return lm;
                 }
                 case AIX:
+                case BSD:
                 case MACOS:
+                    // ProcessImpl_md.c compiles forkChild() and spawnChild() on every
+                    // Unix, so both are usable here. VFORK stays Linux-only because
+                    // it is deprecated, not because BSD lacks it.
                     if (lm != LaunchMechanism.VFORK) {
                         return lm; // All but VFORK are valid
                     }

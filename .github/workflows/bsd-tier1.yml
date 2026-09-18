@@ -1,0 +1,54 @@
+#
+# Cross-build the BSDs, then run tier1 on a real NetBSD.
+#
+# Fork-only: the pull request carries the port, not the machinery for
+# measuring it here. Kept on its own branch so the four build jobs the PR
+# does have stay exactly as upstream sees them.
+#
+name: 'BSD tier1'
+
+on:
+  push:
+    branches:
+      - tier1-bsd-25
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'NetBSD release to run the tests in'
+        required: false
+        default: '10.1'
+
+concurrency:
+  group: bsd-tier1-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # get-jtreg in the test job downloads an artifact that somebody has to have
+  # built; upstream's main.yml does it in its preparation job, so do the same
+  # here rather than teach the test job to build jtreg itself.
+  jtreg:
+    name: jtreg
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 'Checkout the scripts'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            .github
+            make/conf/github-actions.conf
+
+      - name: 'Build JTReg'
+        uses: ./.github/actions/build-jtreg
+
+  build:
+    name: build
+    uses: ./.github/workflows/build-bsd.yml
+
+  test:
+    name: test
+    needs: [jtreg, build]
+    uses: ./.github/workflows/test-bsd.yml
+    with:
+      target-os: 'netbsd'
+      platform: 'bsd-x86_64-netbsd'
+      release: ${{ inputs.release || '10.1' }}

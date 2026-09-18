@@ -57,11 +57,23 @@ class BsdThread implements ThreadProxy {
     }
 
     public int hashCode() {
-        return thread_id;
+        // equals() compares unique_thread_id, so this has to hash the same
+        // field.  It used to hash thread_id, which is 0 for every proxy the
+        // agent builds through the constructor below -- that one is handed
+        // only the unique id.  PStack puts its proxies into a HashMap keyed by
+        // the proxies JavaThread hands out, where thread_id is set, and looks
+        // them up with the agent's, where it is not.  The two are equal and
+        // land in different buckets, so every lookup missed and pstack printed
+        // no thread names and no Java frames at all.
+        return Long.hashCode(unique_thread_id);
     }
 
     public String toString() {
-        return Integer.toString(thread_id);
+        // Same two constructors: the agent's proxies have no thread_id, and
+        // printing a column of zeroes for every thread is no use.  On the BSDs
+        // other than macOS both numbers are the kernel's lwp id, so the unique
+        // id is the right thing to fall back to.
+        return Long.toString(thread_id != 0 ? thread_id : unique_thread_id);
     }
 
     public ThreadContext getContext() throws IllegalThreadStateException {

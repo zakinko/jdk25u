@@ -391,3 +391,18 @@ JNIEXPORT void JNICALL Java_sun_tools_attach_VirtualMachineImpl_createAttachFile
         JNU_ReleaseStringPlatformChars(env, path, _path);
     }
 }
+
+/*
+ * Class:     sun_tools_attach_VirtualMachineImpl
+ * Method:    getTempDir
+ * Signature: (V)Ljava.lang.String;
+ */
+JNIEXPORT jstring JNICALL Java_sun_tools_attach_VirtualMachineImpl_getTempDir(JNIEnv *env, jclass cls)
+{
+    // This must be hard coded because it's the system's temporary
+    // directory not the java application's temp directory, ala java.io.tmpdir.
+    // The BSDs have no per-user equivalent of the directory macOS reports
+    // through _CS_DARWIN_USER_TEMP_DIR, so the attach file goes in /tmp,
+    // which is where the target VM looks for it.
+    return (*env)->NewStringUTF(env, "/tmp");
+}
