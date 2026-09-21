@@ -1,0 +1,93 @@
+#
+# Does the bootstrap kit actually start on the NetBSD it is named for?
+#
+# The one built from 4ec579d29 did not: every object carried four PT_LOAD
+# segments and NetBSD 10's ld.elf_so accepts exactly two, so on 10 the
+# launcher could not load libjli.so, and on 11 it still died in VM
+# initialisation for want of a PaX mark.  Nothing measured that before the
+# kit was named "netbsd-10" and put where pkgsrc would fetch it from.
+#
+# So: take the kit a run produced, count the segments, mark it the way
+# bootstrap.mk marks it, and run java -version on 10.1 and 11.0.  Only a kit
+# that passes here goes anywhere.
+#
+name: 'Kit probe'
+
+on:
+  push:
+    branches:
+      - pr/kit-probe
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: 'Bootstrap kit run to take the kit from'
+        required: false
+        default: '35312539154'
+
+concurrency:
+  group: kit-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: ${{ matrix.release }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ['10.1', '11.0']
+
+    steps:
+      - name: 'Download the kit'
+        uses: actions/download-artifact@v8
+        with:
+          name: jdk-netbsd10.1-x86_64
+          path: kit
+          run-id: ${{ inputs.run-id || '35312539154' }}
+          github-token: ${{ github.token }}
+
+      - name: 'Unpack and count the load segments'
+        run: |
+          cd kit
+          tar xzf *.tar.gz
+          D=$(ls -d */ | head -1); D=${D%/}
+          echo "kit=$D" >> "$GITHUB_ENV"
+          grep -E 'SOURCE|JAVA_RUNTIME' "$D/release"
+          # readelf is on the runner; NetBSD 10's rtld wants two PT_LOAD
+          # segments, no more.  Every shared object and the launcher.
+          bad=0; n=0
+          for f in "$D/bin/java" $(find "$D" -name '*.so'); do
+            c=$(readelf -l "$f" | grep -c '^  LOAD')
+            n=$((n+1))
+            if [ "$c" -gt 2 ]; then echo "  $c PT_LOAD: $f"; bad=$((bad+1)); fi
+          done
+          echo "$n objects checked, $bad with more than two PT_LOAD"
+          [ "$n" -gt 20 ] || { echo "too few objects found to mean anything"; exit 1; }
+          [ "$bad" -eq 0 ] || exit 1
+
+      - name: 'Start it on NetBSD ${{ matrix.release }}'
+        uses: vmactions/netbsd-vm@v1.5.0
+        with:
+          release: ${{ matrix.release }}
+          mem: 2048
+          cpu: 2
+          usesh: true
+          copyback: false
+          envs: 'kit'
+          run: |
+            set -e
+            JDK="$PWD/kit/$kit"
+            echo "--- `uname -srm` ---"
+            # What bootstrap.mk does on extraction; the kit itself cannot
+            # carry the mark because paxctl only exists on NetBSD.
+            find "$JDK" -type f \( -perm -u+x -o -name '*.so' \) -print |
+              while read f; do /usr/sbin/paxctl +m "$f" >/dev/null 2>&1 || :; done
+            /usr/sbin/paxctl "$JDK/bin/java" | head -2
+            echo "--- java -version ---"
+            "$JDK/bin/java" -version
+            echo "--- can it compile and run something ---"
+            cat > Hello.java <<'EOF'
+            public class Hello { public static void main(String[] a) { System.out.println("hello from " + System.getProperty("os.name") + " " + System.getProperty("os.version")); } }
+            EOF
+            "$JDK/bin/javac" Hello.java
+            "$JDK/bin/java" Hello
