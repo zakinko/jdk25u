@@ -31,7 +31,11 @@
 #include <sys/sysctl.h>
 #include <sys/types.h>
 #include <sys/un.h>
+#ifdef __FreeBSD__
+// FreeBSD keeps struct kinfo_proc here rather than in <sys/sysctl.h>.
+// NetBSD has no such header, and gets kinfo_proc2 from <sys/sysctl.h>.
 #include <sys/user.h>
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
