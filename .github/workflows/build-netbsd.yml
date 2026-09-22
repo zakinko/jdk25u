@@ -153,7 +153,7 @@ jobs:
       - name: 'Install toolchain and dependencies in VM'
         shell: netbsd {0}
         run: >
-          /usr/sbin/pkg_add autoconf automake pkgconf gtar zip unzip cups bash gmake gsed libiconv harfbuzz lcms2 png giflib libjpeg-turbo fontconfig freetype2 alsa-lib
+          /usr/sbin/pkg_add grep autoconf automake pkgconf gtar zip unzip cups bash gmake gsed libiconv harfbuzz lcms2 png giflib libjpeg-turbo fontconfig freetype2 alsa-lib
 
       - name: 'Configure in VM'
         shell: netbsd {0}
@@ -161,7 +161,7 @@ jobs:
           . ~/.vmenv &&
           bash configure
           SED=/usr/pkg/bin/gsed
-          GREP=/usr/local/bin/ggrep
+          GREP=/usr/pkg/bin/ggrep
           --with-conf-name=${{ inputs.platform }}
           ${{ matrix.flags }}
           --with-version-opt=${GITHUB_ACTOR}-${GITHUB_SHA}
