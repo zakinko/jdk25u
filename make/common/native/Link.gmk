@@ -195,7 +195,8 @@ define CreateDynamicLibraryOrExecutable
           endif
         endif
         ifeq ($(OPENJDK_TARGET_OS_ENV), bsd.netbsd)
-          /usr/sbin/paxctl +m $$@
+	  $$(call ExecuteWithLog, $$($1_OBJECT_DIR)/$$($1_SAFE_NAME)_paxctl, \
+	      /usr/sbin/paxctl +m $$($1_TARGET))
         endif
         ifeq ($(call isTargetOsEnv, bsd.freebsd)+$$($1_TYPE), true+EXECUTABLE)
 	   $$(call ExecuteWithLog, $$($1_OBJECT_DIR)/$$($1_SAFE_NAME)_elfctl, \
