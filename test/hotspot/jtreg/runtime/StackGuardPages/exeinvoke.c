@@ -53,6 +53,9 @@
 #if defined(__FreeBSD__) || defined(__OpenBSD__)
 #include <pthread_np.h>
 #endif
+#if defined(__NetBSD__)
+#include <lwp.h>
+#endif
 
 #define CLASS_PATH_OPT "-Djava.class.path="
 
@@ -78,6 +81,16 @@ pid_t gettid() {
 #endif
 int is_main_thread(void) {
   return pthread_main_np();
+}
+#elif defined(__NetBSD__)
+// No SYS_gettid and no pthread_np.h here.  The initial thread's lwp id is
+// the process id, so the same comparison the Linux branch makes below tells
+// the main thread apart (measured on 10.1).
+pid_t gettid() {
+  return (pid_t) _lwp_self();
+}
+int is_main_thread(void) {
+  return gettid() == getpid();
 }
 #else
 pid_t gettid() {
