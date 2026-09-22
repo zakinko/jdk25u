@@ -1,0 +1,66 @@
+#
+# Does the DragonFly bootstrap kit actually start on DragonFly?
+#
+# The NetBSD kit taught this lesson once: a cross build that links is not a
+# JDK that runs, and the difference only shows on the target.  DragonFly's
+# rtld expands $ORIGIN only when DF_ORIGIN is set, and refuses an object
+# without it with a "not found" for the library, which reads like a packaging
+# mistake rather than a linker flag.  So take the kit a run produced, check
+# the flag, and run java -version and a one-file compile on 6.4.
+#
+name: 'Kit probe (dragonfly)'
+
+on:
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: 'Bootstrap kit run to take the kit from'
+        required: true
+
+concurrency:
+  group: kit-probe-dragonfly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: '6.4'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 'Download the kit'
+        uses: actions/download-artifact@v8
+        with:
+          name: jdk-dragonfly-x86_64
+          path: kit
+          run-id: ${{ inputs.run-id }}
+          github-token: ${{ github.token }}
+
+      - name: 'Unpack and check DF_ORIGIN on the launcher'
+        run: |
+          cd kit
+          tar xzf *.tar.gz
+          D=$(ls -d */ | head -1); D=${D%/}
+          echo "kit=$D" >> "$GITHUB_ENV"
+          grep -E 'SOURCE|JAVA_RUNTIME' "$D/release"
+          readelf -d "$D/bin/java" | grep -i 'ORIGIN\|RPATH\|RUNPATH\|FLAGS'
+          readelf -d "$D/bin/java" | grep -q 'ORIGIN' || { echo "no DF_ORIGIN on bin/java"; exit 1; }
+
+      - name: 'Start it on DragonFly'
+        uses: vmactions/dragonflybsd-vm@v1
+        with:
+          mem: 2048
+          cpu: 2
+          usesh: true
+          copyback: false
+          envs: 'kit'
+          run: |
+            set -e
+            JDK="$PWD/kit/$kit"
+            echo "--- `uname -srm` ---"
+            echo "--- java -version ---"
+            "$JDK/bin/java" -version
+            echo "--- can it compile and run something ---"
+            cat > Hello.java <<'EOF2'
+            public class Hello { public static void main(String[] a) { System.out.println("hello from " + System.getProperty("os.name") + " " + System.getProperty("os.version")); } }
+            EOF2
+            "$JDK/bin/javac" Hello.java
+            "$JDK/bin/java" Hello
