@@ -1,17 +1,17 @@
 #
-# Cross-build a NetBSD/amd64 JDK and keep the bundle.
+# Cross-build a NetBSD/amd64 or DragonFly/x86_64 JDK and keep the bundle.
 #
 # This is not part of the BSD port that goes upstream.  It exists because
-# pkgsrc cannot build lang/openjdk25 on NetBSD at all: its predecessor
-# lang/openjdk21 bootstraps from a prebuilt bootstrap-jdk tarball hosted by
-# NetBSD, JDK 21 cannot compile JDK 25, and no NetBSD kit of 24 or 25 exists
-# to take its place.  Somebody has to produce the first one, and a cross
-# build from Linux is cheaper than four chained native builds.
+# neither OS can build JDK 25 from what it ships: pkgsrc's lang/openjdk21
+# bootstraps from a prebuilt bootstrap-jdk tarball hosted by NetBSD, dports
+# stops at openjdk21, and JDK 21 cannot compile JDK 25.  Somebody has to
+# produce the first kit of 25, and a cross build from Linux is cheaper than
+# four chained native builds.
 #
 # What comes out is a candidate, not a verified boot JDK: nothing here runs a
-# line of it.  That has to happen on a NetBSD machine.
+# line of it.  That has to happen on a machine running the target OS.
 #
-name: 'Bootstrap kit (netbsd)'
+name: 'Bootstrap kit'
 
 on:
   push:
@@ -19,13 +19,18 @@ on:
       - bootstrap-kit-25
   workflow_dispatch:
     inputs:
+      target-os:
+        description: 'Which OS to build the kit for'
+        type: choice
+        options: [netbsd, dragonfly]
+        default: netbsd
       netbsd-version:
-        description: 'NetBSD release to build the sysroot from'
+        description: 'NetBSD release to build the sysroot from (netbsd only)'
         required: false
         default: '10.1'
 
 concurrency:
-  group: bootstrap-kit-${{ github.ref }}
+  group: bootstrap-kit-${{ github.ref }}-${{ inputs.target-os || 'netbsd' }}
   cancel-in-progress: true
 
 env:
@@ -34,6 +39,10 @@ env:
   # no PTHREAD_STACK_MIN, which os_posix.cpp needs.  10.1 is the oldest release
   # this can be built against, so a kit from here serves 10 and 11.
   NETBSD_SETS_VERSION: ${{ inputs.netbsd-version || '10.1' }}
+  # DragonFly has one supported release line and the sysroot script pins it
+  # (6.4.2), so there is nothing to choose there.
+  TARGET_OS: ${{ inputs.target-os || 'netbsd' }}
+  TARGET_TRIPLE: ${{ (inputs.target-os || 'netbsd') == 'dragonfly' && 'x86_64-unknown-dragonfly' || 'x86_64-unknown-netbsd' }}
 
 jobs:
   kit:
@@ -62,24 +71,24 @@ jobs:
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: sysroot
-          key: sysroot-netbsd-${{ env.NETBSD_SETS_VERSION }}-${{ hashFiles('./.github/scripts/gen-bsd-sysroot.sh') }}
+          key: sysroot-${{ env.TARGET_OS }}-${{ env.NETBSD_SETS_VERSION }}-${{ hashFiles('./.github/scripts/gen-bsd-sysroot.sh') }}
 
       - name: 'Create sysroot'
-        run: bash .github/scripts/gen-bsd-sysroot.sh netbsd sysroot
+        run: bash .github/scripts/gen-bsd-sysroot.sh "$TARGET_OS" sysroot
         if: steps.get-cached-sysroot.outputs.cache-hit != 'true'
 
       - name: 'Prepare the cross compiler'
         run: >
           bash .github/scripts/gen-bsd-crosstool.sh
-          netbsd x86_64-unknown-netbsd "$PWD/sysroot" "$PWD/cross-bin"
+          "$TARGET_OS" "$TARGET_TRIPLE" "$PWD/sysroot" "$PWD/cross-bin"
 
       - name: 'Configure'
         run: >
           PATH="$PWD/cross-bin:$PATH"
           bash configure
-          --with-conf-name=bsd-x86_64-netbsd
+          --with-conf-name=bsd-x86_64-$TARGET_OS
           --with-boot-jdk=${{ steps.bootjdk.outputs.path }}
-          --openjdk-target=x86_64-unknown-netbsd
+          --openjdk-target=$TARGET_TRIPLE
           --with-sysroot=$PWD/sysroot
           --with-toolchain-type=clang
           --with-freetype=bundled
@@ -88,8 +97,8 @@ jobs:
           --disable-precompiled-headers
           --with-jmod-compress=zip-1
           --with-external-symbols-in-bundles=none
-          CC=x86_64-unknown-netbsd-clang
-          CXX=x86_64-unknown-netbsd-clang++
+          CC=$TARGET_TRIPLE-clang
+          CXX=$TARGET_TRIPLE-clang++
           BUILD_CC=clang
           BUILD_CXX=clang++
           || (echo "Dumping config.log:" && cat config.log && exit 1)
@@ -101,13 +110,13 @@ jobs:
         id: bundle
         run: |
           set -e
-          ls -l build/bsd-x86_64-netbsd/bundles/
-          jdk="$(ls build/bsd-x86_64-netbsd/bundles/jdk-*_bin.tar.gz | head -1)"
+          ls -l build/bsd-x86_64-$TARGET_OS/bundles/
+          jdk="$(ls build/bsd-x86_64-$TARGET_OS/bundles/jdk-*_bin.tar.gz | head -1)"
           echo "path=$jdk" >> $GITHUB_OUTPUT
 
       - name: 'Upload the bundle'
         uses: actions/upload-artifact@v6
         with:
-          name: jdk-netbsd${{ env.NETBSD_SETS_VERSION }}-x86_64
+          name: jdk-${{ env.TARGET_OS }}${{ env.TARGET_OS == 'netbsd' && env.NETBSD_SETS_VERSION || '' }}-x86_64
           path: ${{ steps.bundle.outputs.path }}
           retention-days: 14
