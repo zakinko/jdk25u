@@ -10,12 +10,21 @@
 #
 name: 'Kit probe (dragonfly)'
 
+# A workflow that has never run on the default branch cannot be dispatched
+# by name, so a push touching this file runs it once, against the kit named
+# in the default; after that workflow_dispatch works.
 on:
+  push:
+    branches:
+      - bootstrap-kit-25
+    paths:
+      - '.github/workflows/kit-probe-dragonfly.yml'
   workflow_dispatch:
     inputs:
       run-id:
         description: 'Bootstrap kit run to take the kit from'
-        required: true
+        required: false
+        default: '35684267403'
 
 concurrency:
   group: kit-probe-dragonfly-${{ github.ref }}
@@ -31,7 +40,7 @@ jobs:
         with:
           name: jdk-dragonfly-x86_64
           path: kit
-          run-id: ${{ inputs.run-id }}
+          run-id: ${{ inputs.run-id || '35684267403' }}
           github-token: ${{ github.token }}
 
       - name: 'Unpack and check DF_ORIGIN on the launcher'
