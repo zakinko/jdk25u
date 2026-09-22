@@ -138,6 +138,10 @@ public class Platform {
         return osName.toLowerCase().equals("openbsd");
     }
 
+    public static boolean isNetBSD() {
+        return osName.toLowerCase().equals("netbsd");
+    }
+
     private static boolean isOs(String osname) {
         return osName.toLowerCase(ROOT).startsWith(osname.toLowerCase(ROOT));
     }
@@ -257,8 +261,12 @@ public class Platform {
         }
         if (isAix()) {
             return false; // SA not implemented.
-        } else if (isOpenBSD()) {
-            return false; // SA not implemented.
+        } else if (isOpenBSD() || isNetBSD()) {
+            // The build leaves jdk.hotspot.agent out on both: INCLUDE_SA is
+            // false for bsd.openbsd and bsd.netbsd in jdk-options.m4.  Saying
+            // so only for OpenBSD had every SA test run on NetBSD and fail
+            // for want of bin/jhsdb.
+            return false; // SA not built.
         } else if (isLinux()) {
             if (isS390x() || isARM()) {
                 return false; // SA not implemented.
