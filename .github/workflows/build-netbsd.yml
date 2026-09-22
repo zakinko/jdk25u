@@ -1,0 +1,201 @@
+#
+# Copyright (c) 2025, Oracle and/or its affiliates. All rights reserved.
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+#
+# This code is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License version 2 only, as
+# published by the Free Software Foundation.  Oracle designates this
+# particular file as subject to the "Classpath" exception as provided
+# by Oracle in the LICENSE file that accompanied this code.
+#
+# This code is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# version 2 for more details (a copy is included in the LICENSE file that
+# accompanied this code).
+#
+# You should have received a copy of the GNU General Public License version
+# 2 along with this work; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+# Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+# or visit www.oracle.com if you need additional information or have any
+# questions.
+#
+
+name: 'Build (NetBSD)'
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        required: true
+        type: string
+      runs-on:
+        required: true
+        type: string
+      vm-arch:
+        required: true
+        type: string
+      vm-release:
+        required: true
+        type: string
+      extra-conf-options:
+        required: false
+        type: string
+      make-target:
+        required: false
+        type: string
+        default: 'product-bundles test-bundles'
+      debug-levels:
+        required: false
+        type: string
+        default: '[ "debug", "release" ]'
+      configure-arguments:
+        required: false
+        type: string
+      make-arguments:
+        required: false
+        type: string
+
+jobs:
+  build-netbsd:
+    name: build
+    runs-on: ${{ inputs.runs-on }}
+
+    env:
+      MYTOKEN : ${{ secrets.MYTOKEN }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        debug-level: ${{ fromJSON(inputs.debug-levels) }}
+        include:
+          - debug-level: debug
+            flags: --with-debug-level=fastdebug
+            suffix: -debug
+
+    steps:
+      - name: Setup Host for VM
+        run: |
+          echo "Starting storage:"
+          sudo df -h
+          echo "Removing Android SDKs and Tools"
+          sudo rm -rf /usr/local/lib/android
+          echo "Reduce swappiness"
+          sudo sysctl vm.swappiness=10
+          echo "Available storage:"
+          sudo df -h
+
+      - name: 'Checkout the JDK source'
+        uses: actions/checkout@v6
+
+      - name: 'Set the BootJDK path'
+        id: bootjdk
+        run: echo 'path=/usr/pkg/java/openjdk25' >> $GITHUB_OUTPUT
+
+      - name: 'Get JTReg'
+        id: jtreg
+        uses: ./.github/actions/get-jtreg
+
+      - name: 'Get GTest'
+        id: gtest
+        uses: ./.github/actions/get-gtest
+
+      - name: 'Start NetBSD VM'
+        uses: vmactions/netbsd-vm@v1
+        with:
+          release: ${{ inputs.vm-release }}
+          arch: ${{ inputs.vm-arch }}
+          mem: 12288
+          cpu: 4
+          envs: 'MYTOKEN'
+          usesh: true
+          copyback: false
+          prepare: |
+            mount -t procfs procfs /proc
+            # The image carries no X11 sets, and the build wants the headers
+            # even when headless (configure asks for Xlib.h, shape.h, Xrender.h
+            # and the rest before it looks at --enable-headless-only).  Take
+            # xbase and xcomp from the release the VM is running.
+            REL=`uname -r | cut -d_ -f1`
+            ARCH=`uname -m`
+            for set in xbase xcomp; do
+              ftp -o /var/tmp/$set.tar.xz "https://cdn.NetBSD.org/pub/NetBSD/NetBSD-$REL/$ARCH/binary/sets/$set.tar.xz"
+              tar -xJpf /var/tmp/$set.tar.xz -C /
+              rm -f /var/tmp/$set.tar.xz
+            done
+            ls /usr/X11R7/include/X11/Xlib.h
+            echo 'cd $GITHUB_WORKSPACE' >> ~/.vmenv
+
+      # Warnings are not errors here, which is how pkgsrc's lang/openjdk25
+      # builds this tree too.  With them, the base gcc stops at an unused
+      # function the NetBSD branch of os_bsd.cpp never calls.
+      # The image's pkg_add already points at NetBSD's binary repository.
+      # The boot JDK is pkgsrc's lang/openjdk25, the X11 headers and
+      # libraries are in the base system under /usr/X11R7, and the compiler
+      # is the base gcc.
+      - name: 'Install toolchain and dependencies in VM'
+        shell: netbsd {0}
+        run: >
+          /usr/sbin/pkg_add openjdk25 autoconf automake pkgconf gtar zip unzip cups bash gmake gsed libiconv harfbuzz lcms2 png giflib libjpeg-turbo fontconfig freetype2 alsa-lib
+
+      - name: 'Configure in VM'
+        shell: netbsd {0}
+        run: >
+          . ~/.vmenv &&
+          bash configure
+          SED=/usr/pkg/bin/gsed
+          GREP=/usr/local/bin/ggrep
+          --with-conf-name=${{ inputs.platform }}
+          ${{ matrix.flags }}
+          --with-version-opt=${GITHUB_ACTOR}-${GITHUB_SHA}
+          --with-boot-jdk=${{ steps.bootjdk.outputs.path }}
+          --with-jtreg=${{ steps.jtreg.outputs.path }}
+          --with-gtest=${{ steps.gtest.outputs.path }}
+          --with-zlib=system
+          --with-jmod-compress=zip-1
+          --with-stdc++lib=dynamic
+          --with-toolchain-type=gcc
+          --disable-warnings-as-errors
+          --with-fontconfig=/usr/pkg
+          --with-cups=/usr/pkg
+          --with-freetype=system
+          --with-zlib=system
+          --with-libpng=system
+          --with-libjpeg=system
+          --with-lcms=system
+          --with-harfbuzz=system
+          --with-giflib=system
+          --with-giflib-include=/usr/pkg/include
+          --with-giflib-lib=/usr/pkg/lib
+          --with-alsa=/usr/pkg
+          --x-includes=/usr/X11R7/include
+          --x-libraries=/usr/X11R7/lib
+          ${{ inputs.extra-conf-options }} ${{ inputs.configure-arguments }} || (
+          echo "Dumping config.log:" &&
+          cat config.log &&
+          exit 1)
+
+      - name: 'Build In VM'
+        id: build
+        uses: ./.github/actions/do-build-vm
+        with:
+          make-target: '${{ inputs.make-target }} ${{ inputs.make-arguments }}'
+          platform: ${{ inputs.platform }}
+          vm-name: 'netbsd'
+          debug-suffix: '${{ matrix.suffix }}'
+
+      - name: 'Check Memory, Swap and Disk Usage'
+        run: |
+          echo "Memory and swap:"
+          sudo free -h
+          echo
+          echo "Available storage:"
+          sudo df -h
+
+      - name: 'Upload bundles'
+        uses: ./.github/actions/upload-bundles
+        with:
+          platform: ${{ inputs.platform }}
+          debug-suffix: '${{ matrix.suffix }}'

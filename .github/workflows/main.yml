@@ -37,7 +37,7 @@ on:
       platforms:
         description: 'Platform(s) to execute on (comma separated, e.g. "linux-x64, macos, aarch64")'
         required: true
-        default: 'linux-x64, linux-x64-variants, linux-cross-compile, alpine-linux-x64, macos-x64, macos-aarch64, windows-x64, windows-aarch64, openbsd-x64, freebsd-x64, docs'
+        default: 'linux-x64, linux-x64-variants, linux-cross-compile, alpine-linux-x64, macos-x64, macos-aarch64, windows-x64, windows-aarch64, openbsd-x64, freebsd-x64, netbsd-x64, docs'
       configure-arguments:
         description: 'Additional configure arguments'
         required: false
@@ -74,6 +74,7 @@ jobs:
       windows-x64: ${{ steps.include.outputs.windows-x64 }}
       windows-aarch64: ${{ steps.include.outputs.windows-aarch64 }}
       openbsd-x64: ${{ steps.include.outputs.openbsd-x64 }}
+      netbsd-x64: ${{ steps.include.outputs.netbsd-x64 }}
       freebsd-x64: ${{ steps.include.outputs.freebsd-x64 }}
       docs: ${{ steps.include.outputs.docs }}
       dry-run: ${{ steps.include.outputs.dry-run }}
@@ -188,6 +189,7 @@ jobs:
           echo "windows-x64=$(check_platform windows-x64 windows x64)" >> $GITHUB_OUTPUT
           echo "windows-aarch64=$(check_platform windows-aarch64 windows aarch64)" >> $GITHUB_OUTPUT
           echo "openbsd-x64=$(check_platform openbsd-x64 openbsd x64)" >> $GITHUB_OUTPUT
+          echo "netbsd-x64=$(check_platform netbsd-x64 netbsd x64)" >> $GITHUB_OUTPUT
           echo "freebsd-x64=$(check_platform freebsd-x64 freebsd x64)" >> $GITHUB_OUTPUT
           echo "docs=$(check_platform docs)" >> $GITHUB_OUTPUT
           echo "dry-run=$(check_dry_run)" >> $GITHUB_OUTPUT
@@ -410,6 +412,19 @@ jobs:
       make-arguments: ${{ github.event.inputs.make-arguments }}
     if: needs.prepare.outputs.freebsd-x64 == 'true'
 
+  build-netbsd-x64:
+    name: netbsd-x64
+    needs: prepare
+    uses: ./.github/workflows/build-netbsd.yml
+    with:
+      platform: netbsd-x64
+      runs-on: ubuntu-24.04
+      vm-arch: 'x86_64'
+      vm-release: "10.1"
+      configure-arguments: ${{ github.event.inputs.configure-arguments }}
+      make-arguments: ${{ github.event.inputs.make-arguments }}
+    if: needs.prepare.outputs.netbsd-x64 == 'true'
+
   build-docs:
     name: docs
     needs: prepare
@@ -495,6 +510,18 @@ jobs:
       platform: freebsd-x64
       runs-on: ubuntu-24.04
       vm-release: 14.4
+      vm-arch: x86_64
+
+  test-netbsd-x64:
+    name: netbsd-x64
+    needs:
+      - prepare
+      - build-netbsd-x64
+    uses: ./.github/workflows/test-netbsd.yml
+    with:
+      platform: netbsd-x64
+      runs-on: ubuntu-24.04
+      vm-release: 10.1
       vm-arch: x86_64
       debug-suffix: -debug
 
