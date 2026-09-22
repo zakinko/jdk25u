@@ -195,7 +195,22 @@ jobs:
               rm -f /var/tmp/$set.tar.xz
             done
             ls /usr/X11R7/include/X11/Xlib.h
-            /usr/sbin/pkg_add openjdk25 grep gtar zip unzip cups bash gmake gsed libiconv harfbuzz lcms2 png giflib libjpeg-turbo fontconfig freetype2 alsa-lib
+            # There is no openjdk25 in NetBSD's binary repository yet -- JDK 25
+            # accepts only a 24 or 25 boot JDK, and pkgsrc stops at 21 -- so
+            # the boot JDK is the bootstrap kit lang/openjdk25 will use: a JDK
+            # 25 cross-built against the NetBSD 10.1 sysroot.  It carries no
+            # PaX mark (paxctl exists only on NetBSD), so mark it here the way
+            # the package does on extraction.
+            KIT=bootstrap-jdk-1.25.0.5.0-netbsd-10-amd64-20260921.tar.xz
+            ftp -o /var/tmp/$KIT "https://github.com/zakinko/jdk25u/releases/download/bootstrap-kit-25-20260921/$KIT"
+            mkdir -p /usr/pkg/java
+            tar -xJf /var/tmp/$KIT -C /usr/pkg/java
+            mv /usr/pkg/java/bootstrap /usr/pkg/java/openjdk25
+            rm -f /var/tmp/$KIT
+            find /usr/pkg/java/openjdk25 -type f \( -perm -u+x -o -name '*.so' \) -print |
+              while read f; do /usr/sbin/paxctl +m "$f" >/dev/null 2>&1 || :; done
+            /usr/pkg/java/openjdk25/bin/java -version
+            /usr/sbin/pkg_add grep gtar zip unzip cups bash gmake gsed libiconv harfbuzz lcms2 png giflib libjpeg-turbo fontconfig freetype2 alsa-lib
           run: >
             gmake test-prebuilt
             SED=/usr/pkg/bin/gsed
