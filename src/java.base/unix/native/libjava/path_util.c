@@ -27,6 +27,16 @@
 #include <string.h>
 #if !defined(_ALLBSD_SOURCE)
 #include <alloca.h>
+#else
+/* The BSDs declare alloca() in <stdlib.h> and have no <alloca.h>.  NetBSD
+   prototypes it rather than defining the builtin, and this file is
+   compiled as -std=c11, where gcc does not treat the name as a builtin
+   either, so the call goes to the libc symbol -- which allocates on the
+   frame that is about to be popped, and which NetBSD's linker refuses
+   outright.  Say which one is meant. */
+#ifndef alloca
+#define alloca(size) __builtin_alloca(size)
+#endif
 #endif
 
 #include "path_util.h"
