@@ -35,10 +35,10 @@ class ICache : public AbstractICache {
  public:
   static void initialize(int phase);
   static void invalidate_word(address addr) {
-    __clear_cache((char *)addr, (char *)(addr + 4));
+    __builtin___clear_cache((char *)addr, (char *)(addr + 4));
   }
   static void invalidate_range(address start, int nbytes) {
-    __clear_cache((char *)start, (char *)(start + nbytes));
+    __builtin___clear_cache((char *)start, (char *)(start + nbytes));
   }
 };
 
