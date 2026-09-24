@@ -27,6 +27,7 @@
 
 #include "utilities/vmassert_uninstall.hpp"
 BEGIN_ALLOW_FORBIDDEN_FUNCTIONS
+#include <cmath>
 #include <iostream>
 END_ALLOW_FORBIDDEN_FUNCTIONS
 #include "utilities/vmassert_reinstall.hpp"
@@ -159,6 +160,6 @@ TEST_VM_F(ShenandoahNumberSeqMergeTest, merge_test) {
   EXPECT_NEAR(merged.sd(),  seq3.sd(),  err);
 
   // These are not implemented
-  EXPECT_TRUE(isnan(merged.davg()));
-  EXPECT_TRUE(isnan(merged.dvariance()));
+  EXPECT_TRUE(std::isnan(merged.davg()));
+  EXPECT_TRUE(std::isnan(merged.dvariance()));
 }
