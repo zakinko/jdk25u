@@ -172,6 +172,7 @@ jobs:
           --with-jmod-compress=zip-1
           --with-stdc++lib=dynamic
           --with-toolchain-type=gcc
+          --disable-precompiled-headers
           --disable-warnings-as-errors
           --with-fontconfig=/usr/pkg
           --with-cups=/usr/pkg
