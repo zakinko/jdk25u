@@ -40,7 +40,11 @@
 #include "utilities/powerOfTwo.hpp"
 
 #ifndef _ALLBSD_SOURCE
+// Nothing here names anything from <sys/sysinfo.h>, and the BSDs do not
+// carry the header at all, so ask for it only where it exists.
+#if defined(LINUX) || defined(_AIX)
 #include <sys/sysinfo.h>
+#endif
 #endif
 
 #if defined(_AIX)
