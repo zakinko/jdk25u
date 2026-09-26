@@ -31,6 +31,24 @@
 
 // Implementation of class atomic
 
+// The 8-byte operations below go through an 8-byte aligned view of their
+// operand.  The i386 ABI aligns a 64-bit integer to four bytes, so without
+// it clang cannot assume a naturally aligned operand and turns every one of
+// them into a call to __atomic_*_8 -- which nothing on the NetBSD link line
+// provides -- and warns that it did (-Watomic-alignment).  With it, clang
+// emits lock cmpxchg8b, which is atomic at any alignment, as gcc does
+// without being told.  Where the ABI already aligns them to eight, as on
+// 32-bit arm and on every 64-bit machine, this changes nothing.
+template<typename T>
+struct BsdZeroAligned8 {
+  typedef T type __attribute__((aligned(8)));
+};
+
+template<typename T>
+inline typename BsdZeroAligned8<T>::type volatile* bsd_zero_aligned8(T volatile* p) {
+  return reinterpret_cast<typename BsdZeroAligned8<T>::type volatile*>(p);
+}
+
 template<size_t byte_size>
 struct Atomic::PlatformAdd {
   template<typename D, typename I>
@@ -61,7 +79,7 @@ inline D Atomic::PlatformAdd<8>::add_then_fetch(D volatile* dest, I add_value,
   STATIC_ASSERT(8 == sizeof(I));
   STATIC_ASSERT(8 == sizeof(D));
 
-  D res = __atomic_add_fetch(dest, add_value, __ATOMIC_RELEASE);
+  D res = __atomic_add_fetch(bsd_zero_aligned8(dest), add_value, __ATOMIC_RELEASE);
   FULL_MEM_BARRIER;
   return res;
 }
@@ -85,7 +103,7 @@ inline T Atomic::PlatformXchg<8>::operator()(T volatile* dest,
                                              atomic_memory_order order) const {
   STATIC_ASSERT(8 == sizeof(T));
   FULL_MEM_BARRIER;
-  T result = __atomic_exchange_n(dest, exchange_value, __ATOMIC_RELAXED);
+  T result = __atomic_exchange_n(bsd_zero_aligned8(dest), exchange_value, __ATOMIC_RELAXED);
   FULL_MEM_BARRIER;
   return result;
 }
@@ -119,7 +137,7 @@ inline T Atomic::PlatformCmpxchg<8>::operator()(T volatile* dest,
 
   T value = compare_value;
   FULL_MEM_BARRIER;
-  __atomic_compare_exchange(dest, &value, &exchange_value, /*weak*/false,
+  __atomic_compare_exchange(bsd_zero_aligned8(dest), &value, &exchange_value, /*weak*/false,
                             __ATOMIC_RELAXED, __ATOMIC_RELAXED);
   FULL_MEM_BARRIER;
   return value;
@@ -128,8 +146,9 @@ inline T Atomic::PlatformCmpxchg<8>::operator()(T volatile* dest,
 // Atomically copy 64 bits of data
 inline void atomic_copy64(const volatile void *src, volatile void *dst) {
   int64_t tmp;
-  __atomic_load(reinterpret_cast<const volatile int64_t*>(src), &tmp, __ATOMIC_RELAXED);
-  __atomic_store(reinterpret_cast<volatile int64_t*>(dst), &tmp, __ATOMIC_RELAXED);
+  __atomic_load(bsd_zero_aligned8(reinterpret_cast<volatile int64_t*>(const_cast<volatile void*>(src))),
+                &tmp, __ATOMIC_RELAXED);
+  __atomic_store(bsd_zero_aligned8(reinterpret_cast<volatile int64_t*>(dst)), &tmp, __ATOMIC_RELAXED);
 }
 
 template<>
@@ -137,7 +156,7 @@ template<typename T>
 inline T Atomic::PlatformLoad<8>::operator()(T const volatile* src) const {
   STATIC_ASSERT(8 == sizeof(T));
   T dest;
-  __atomic_load(const_cast<T*>(src), &dest, __ATOMIC_RELAXED);
+  __atomic_load(bsd_zero_aligned8(const_cast<T*>(src)), &dest, __ATOMIC_RELAXED);
   return dest;
 }
 
@@ -146,7 +165,7 @@ template<typename T>
 inline void Atomic::PlatformStore<8>::operator()(T volatile* dest,
                                                  T store_value) const {
   STATIC_ASSERT(8 == sizeof(T));
-  __atomic_store(dest, &store_value, __ATOMIC_RELAXED);
+  __atomic_store(bsd_zero_aligned8(dest), &store_value, __ATOMIC_RELAXED);
 }
 
 #endif // OS_CPU_BSD_ZERO_ATOMIC_BSD_ZERO_HPP
