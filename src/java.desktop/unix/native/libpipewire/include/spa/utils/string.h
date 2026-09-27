@@ -263,6 +263,12 @@ SPA_API_STRING int spa_scnprintf(char *buffer, size_t size, const char *format, 
  */
 SPA_API_STRING float spa_strtof(const char *str, char **endptr)
 {
+#if defined(__NetBSD__)
+    /* NetBSD has no uselocale(3).  It does have the POSIX 2008 parse
+       functions and a ready-made C locale, which is what the dance below
+       is emulating, so ask for it directly. */
+    return strtof_l(str, endptr, LC_C_LOCALE);
+#else
 #ifndef __LOCALE_C_ONLY
     static locale_t locale = NULL;
     locale_t prev;
@@ -278,6 +284,7 @@ SPA_API_STRING float spa_strtof(const char *str, char **endptr)
     uselocale(prev);
 #endif
     return v;
+#endif /* __NetBSD__ */
 }
 
 /**
@@ -313,6 +320,12 @@ SPA_API_STRING bool spa_atof(const char *str, float *val)
  */
 SPA_API_STRING double spa_strtod(const char *str, char **endptr)
 {
+#if defined(__NetBSD__)
+    /* NetBSD has no uselocale(3).  It does have the POSIX 2008 parse
+       functions and a ready-made C locale, which is what the dance below
+       is emulating, so ask for it directly. */
+    return strtod_l(str, endptr, LC_C_LOCALE);
+#else
 #ifndef __LOCALE_C_ONLY
     static locale_t locale = NULL;
     locale_t prev;
@@ -328,6 +341,7 @@ SPA_API_STRING double spa_strtod(const char *str, char **endptr)
     uselocale(prev);
 #endif
     return v;
+#endif /* __NetBSD__ */
 }
 
 /**
