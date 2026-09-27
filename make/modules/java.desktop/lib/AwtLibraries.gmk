@@ -421,7 +421,11 @@ ifeq ($(call isTargetOs, macosx), true)
   LIBJAWT_EXCLUDE_SRC_PATTERNS := /unix/
 endif
 
-ifeq ($(call isTargetOs, linux)+$(ENABLE_HEADLESS_ONLY), true+true)
+# -DHEADLESS is what makes jawt.c compile the stub that does not call
+# into libawt_xawt; without it a headless build has nothing to link
+# awt_GetDrawingSurface against.  The BSDs need it for the same reason
+# linux does.
+ifeq ($(call isTargetOs, linux bsd)+$(ENABLE_HEADLESS_ONLY), true+true)
   LIBJAWT_CFLAGS += -DHEADLESS
 endif
 ifeq ($(call isTargetOs, aix)+$(ENABLE_HEADLESS_ONLY), true+true)
