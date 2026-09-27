@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2012, 2026 SAP SE. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,7 +28,6 @@
 #include "classfile/vmSymbols.hpp"
 #include "code/codeCache.hpp"
 #include "code/vtableStubs.hpp"
-#include "cppstdlib/cstdlib.hpp"
 #include "interpreter/interpreter.hpp"
 #include "jvm.h"
 #include "memory/allocation.inline.hpp"
@@ -64,6 +63,7 @@
 # include <signal.h>
 # include <errno.h>
 # include <dlfcn.h>
+# include <stdlib.h>
 # include <stdio.h>
 # include <unistd.h>
 # include <sys/resource.h>
@@ -73,6 +73,9 @@
 # include <sys/socket.h>
 # include <sys/wait.h>
 # include <pwd.h>
+#if !defined(__NetBSD__)
+# include <pthread_np.h>
+#endif
 # include <poll.h>
 #ifndef __OpenBSD__
 # include <ucontext.h>
@@ -288,7 +291,15 @@ bool PosixSignals::pd_hotspot_signal_handler(int sig, siginfo_t* info,
 
       CodeBlob *cb = nullptr;
       int stop_type = -1;
-      if ((sig == (USE_POLL_BIT_ONLY ? SIGTRAP : SIGSEGV)) &&
+      // Handle signal from NativeJump::patch_verified_entry().
+      if (sig == SIGILL && nativeInstruction_at(pc)->is_sigill_not_entrant()) {
+        if (TraceTraps) {
+          tty->print_cr("trap: not_entrant");
+        }
+        stub = SharedRuntime::get_handle_wrong_method_stub();
+      }
+
+      else if ((sig == (USE_POLL_BIT_ONLY ? SIGTRAP : SIGSEGV)) &&
                // A linux-ppc64 kernel before 2.6.6 doesn't set si_addr on some segfaults
                // in 64bit mode (cf. http://www.kernel.org/pub/linux/kernel/v2.6/ChangeLog-2.6.6),
                // especially when we try to read from the safepoint polling page. So the check
@@ -314,17 +325,6 @@ bool PosixSignals::pd_hotspot_signal_handler(int sig, siginfo_t* info,
           tty->print_cr("trap: safepoint_poll at return at " INTPTR_FORMAT " (nmethod)", p2i(pc));
         }
         stub = SharedRuntime::polling_page_return_handler_blob()->entry_point();
-      }
-
-      // SIGTRAP-based nmethod entry barriers.
-      else if (sig == SIGTRAP && TrapBasedNMethodEntryBarriers &&
-               nativeInstruction_at(pc)->is_sigtrap_nmethod_entry_barrier() &&
-               CodeCache::contains((void*) pc)) {
-        if (TraceTraps) {
-          tty->print_cr("trap: nmethod entry barrier at " INTPTR_FORMAT " (SIGTRAP)", p2i(pc));
-        }
-        stub = StubRoutines::method_entry_barrier();
-        uc->context_lr = (intptr_t)(pc + BytesPerInstWord); // emulate call by setting LR
       }
 
       // SIGTRAP-based ic miss check in compiled code.
@@ -435,7 +435,7 @@ bool PosixSignals::pd_hotspot_signal_handler(int sig, siginfo_t* info,
 
     // jni_fast_Get<Primitive>Field can trap at certain pc's if a GC kicks in
     // and the heap gets shrunk before the field access.
-    if (stub == nullptr && ((sig == SIGSEGV) || (sig == SIGBUS))) {
+    if ((sig == SIGSEGV) || (sig == SIGBUS)) {
       address addr = JNI_FastGetField::find_slowcase_pc(pc);
       if (addr != (address)-1) {
         stub = addr;
@@ -472,6 +472,47 @@ size_t os::Posix::default_stack_size(os::ThreadType thr_type) {
   // Default stack size (compiler thread needs larger stack).
   size_t s = (thr_type == os::compiler_thread ? 4 * M : 1024 * K);
   return s;
+}
+
+// In 25 each BSD os_cpu file finds the stack itself; macOS has no
+// PowerPC port, so only the other BSDs' ways are needed here.
+void os::current_stack_base_and_size(address* base, size_t* size) {
+  address bottom;
+#if defined(__OpenBSD__)
+  stack_t ss;
+  int rslt = pthread_stackseg_np(pthread_self(), &ss);
+
+  if (rslt != 0)
+    fatal("pthread_stackseg_np failed with error = %d", rslt);
+
+  *base = (address) ss.ss_sp;
+  *size = ss.ss_size;
+  bottom = *base - *size;
+#else
+  pthread_attr_t attr;
+
+  int rslt = pthread_attr_init(&attr);
+
+  // JVM needs to know exact stack location, abort if it fails
+  if (rslt != 0)
+    fatal("pthread_attr_init failed with error = %d", rslt);
+
+  rslt = pthread_attr_get_np(pthread_self(), &attr);
+
+  if (rslt != 0)
+    fatal("pthread_attr_get_np failed with error = %d", rslt);
+
+  if (pthread_attr_getstackaddr(&attr, (void **)&bottom) != 0 ||
+      pthread_attr_getstacksize(&attr, size) != 0) {
+    fatal("Can not locate current stack attributes!");
+  }
+
+  *base = bottom + *size;
+
+  pthread_attr_destroy(&attr);
+#endif
+  assert(os::current_stack_pointer() >= bottom &&
+         os::current_stack_pointer() < *base, "just checking");
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -528,13 +569,7 @@ void os::print_register_info(outputStream *st, const void *context, int& continu
 
 extern "C" {
   int SpinPause() {
-    // Setting prio low, then prio medium results in a pseudo yield.
-    // Yield (or 27,27,27) was never implemented on PPC.
-    //   or 1,1,1 = smt_prio_low
-    //   or 2,2,2 = smt_prio_medium
-    asm volatile ("or 1,1,1\n\t"
-                  "or 2,2,2" : : : "memory");
-    return 1;
+    return 0;
   }
 }
 
