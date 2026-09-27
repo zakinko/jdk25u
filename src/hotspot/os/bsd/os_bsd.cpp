@@ -1302,11 +1302,6 @@ void * os::dll_load(const char *filename, char *ebuf, int ebuflen) {
     {EM_68K,         EM_68K,     ELFCLASS32, ELFDATA2MSB, (char*)"M68k"}
   };
 
-<<<<<<< ours
-  #if  (defined IA32)
-  static  Elf32_Half running_arch_code=EM_386;
-  #elif   (defined AMD64)
-=======
   // The BSDs are built for more machines than macOS, and a machine missing
   // here left running_arch_code undeclared: sparc64 and riscv64 stopped at
   // its first use.  CPU defines come from the target CPU whatever the JVM
@@ -1314,7 +1309,6 @@ void * os::dll_load(const char *filename, char *ebuf, int ebuflen) {
   #if    (defined IA32)
   static  Elf32_Half running_arch_code=EM_386;
   #elif  (defined AMD64)
->>>>>>> theirs
   static  Elf32_Half running_arch_code=EM_X86_64;
   #elif  (defined __sparc) && (defined _LP64)
   static  Elf32_Half running_arch_code=EM_SPARCV9;
@@ -1344,12 +1338,8 @@ void * os::dll_load(const char *filename, char *ebuf, int ebuflen) {
   static  Elf32_Half running_arch_code=EM_68K;
   #else
     #error Method os::dll_load requires that one of following is defined:\
-<<<<<<< ours
-         IA32, AMD64, __powerpc__, ARM, S390, ALPHA, MIPS, MIPSEL, PARISC, M68K
-=======
          IA32, AMD64, __sparc, AARCH64, RISCV64, __powerpc__, ARM, S390, ALPHA,\
          MIPS, MIPSEL, PARISC, M68K
->>>>>>> theirs
   #endif
 
   // Identify compatibility class for VM's architecture and library's architecture
