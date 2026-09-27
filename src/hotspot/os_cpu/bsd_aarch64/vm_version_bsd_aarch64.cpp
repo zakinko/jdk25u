@@ -217,19 +217,19 @@ void VM_Version::get_os_cpu_info() {
       num_paca++;
 #endif
   }
-  if (num_fp == ncpu)     set_feature(CPU_FP);
-  if (num_asimd == ncpu)  set_feature(CPU_ASIMD);
-  if (num_aes == ncpu)    set_feature(CPU_AES);
-  if (num_pmull == ncpu)  set_feature(CPU_PMULL);
-  if (num_sha1 == ncpu)   set_feature(CPU_SHA1);
-  if (num_sha2 == ncpu)   set_feature(CPU_SHA2);
-  if (num_crc32 == ncpu)  set_feature(CPU_CRC32);
-  if (num_lse == ncpu)    set_feature(CPU_LSE);
-  if (num_dcpop == ncpu)  set_feature(CPU_DCPOP);
-  if (num_sha3 == ncpu)   set_feature(CPU_SHA3);
-  if (num_sha512 == ncpu) set_feature(CPU_SHA512);
-  if (num_sve == ncpu)    set_feature(CPU_SVE);
-  if (num_paca == ncpu)   set_feature(CPU_PACA);
+  if (num_fp == ncpu)     _features |= CPU_FP;
+  if (num_asimd == ncpu)  _features |= CPU_ASIMD;
+  if (num_aes == ncpu)    _features |= CPU_AES;
+  if (num_pmull == ncpu)  _features |= CPU_PMULL;
+  if (num_sha1 == ncpu)   _features |= CPU_SHA1;
+  if (num_sha2 == ncpu)   _features |= CPU_SHA2;
+  if (num_crc32 == ncpu)  _features |= CPU_CRC32;
+  if (num_lse == ncpu)    _features |= CPU_LSE;
+  if (num_dcpop == ncpu)  _features |= CPU_DCPOP;
+  if (num_sha3 == ncpu)   _features |= CPU_SHA3;
+  if (num_sha512 == ncpu) _features |= CPU_SHA512;
+  if (num_sve == ncpu)    _features |= CPU_SVE;
+  if (num_paca == ncpu)   _features |= CPU_PACA;
 
   _cpu = CPU_IMPL(id.ac_midr);
   _model = CPU_PART(id.ac_midr);
@@ -587,7 +587,7 @@ lookup_cpu(int &_cpu, int &_model, int &_variant, int &_revision) {
 
 static uint64_t check_feature(unsigned long hwcap, VM_Version::Feature_Flag flag,
                               unsigned long hwcap_bitmask) {
-  return (hwcap & hwcap_bitmask) != 0 ? BIT_MASK(flag) : 0;
+  return (hwcap & hwcap_bitmask) != 0 ? flag : 0;
 }
 
 void VM_Version::get_os_cpu_info() {
@@ -618,12 +618,6 @@ void VM_Version::get_os_cpu_info() {
       check_feature(auxv,  CPU_PACA,    HWCAP_PACA) |
       check_feature(auxv,  CPU_FPHP,    HWCAP_FPHP) |
       check_feature(auxv,  CPU_ASIMDHP, HWCAP_ASIMDHP);
-#ifdef HWCAP2_ECV
-  _features |= check_feature(auxv2, CPU_ECV, HWCAP2_ECV);
-#endif
-#ifdef HWCAP2_WFXT
-  _features |= check_feature(auxv2, CPU_WFXT, HWCAP2_WFXT);
-#endif
   if (auxv & HWCAP_SVE) {
     _features |= check_feature(auxv2, CPU_SVE2,       HWCAP2_SVE2) |
                  check_feature(auxv2, CPU_SVEBITPERM, HWCAP2_SVEBITPERM);
