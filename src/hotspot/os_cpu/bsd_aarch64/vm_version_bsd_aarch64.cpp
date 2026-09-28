@@ -263,17 +263,29 @@ void VM_Version::get_os_cpu_info() {
 #define CPU_VAR(midr)   (((midr) >> 20) & 0xf)
 #define CPU_REV(midr)   (((midr) >> 0) & 0xf)
 
-// XXX: FreeBSD 15+ has sysarch(2) w/ARM64_GET_SVE_VL but the man page
-// says not to call sysarch(2) directly. A libsys function is not yet
-// available. When it does become available FreeBSD can call it instead
-// of using the minimum (128 bits/16 bytes) in the following two functions.
-
-int VM_Version::get_current_sve_vector_length() {
-  return FloatRegister::sve_vl_min;
+// FreeBSD reports SVE through HWCAP_SVE and gives each thread the vector
+// length its kernel chose; there is no call to change it (sysarch(2) has
+// ARM64_GET_SVE_VL, which its man page says not to call directly).  So ask
+// the CPU: RDVL reads the current length in bytes, and these are only
+// called once SVE has been seen, so it cannot trap.  Answering with the
+// minimum instead, when the length is larger, has C2 and the stubs spill,
+// copy and predicate sixteen bytes of registers that hold more.
+// OpenBSD does not report SVE at all.
+static int current_sve_vector_length() {
+  uint64_t vl;
+  __asm__ volatile(".inst 0x04bf5020\n\t"   // rdvl x0, #1
+                   "mov %0, x0" : "=r"(vl) : : "x0");
+  return (int)vl;
 }
 
+int VM_Version::get_current_sve_vector_length() {
+  return current_sve_vector_length();
+}
+
+// The length cannot be set, so every request gets the one there is, which
+// the caller then reports and takes as MaxVectorSize.
 int VM_Version::set_and_get_current_sve_vector_length(int length) {
-  return FloatRegister::sve_vl_min;
+  return current_sve_vector_length();
 }
 
 #ifdef __OpenBSD__
