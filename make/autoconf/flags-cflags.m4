@@ -79,13 +79,13 @@ AC_DEFUN([FLAGS_SETUP_SHARED_LIBS],
       fi
       SET_SHARED_LIBRARY_NAME='-Wl,-soname=[$]1'
 
-      # arm specific settings
-      if test "x$OPENJDK_TARGET_CPU" = "xarm"; then
-        # '-Wl,-z,origin' isn't used on arm.
-        SET_SHARED_LIBRARY_ORIGIN='-Wl,-rpath,\$$$$ORIGIN[$]1'
-      else
-        SET_SHARED_LIBRARY_ORIGIN="-Wl,-z,origin $SET_EXECUTABLE_ORIGIN"
-      fi
+      # arm used to get '-Wl,-rpath,\$$$$ORIGIN[$]1' here, without -z origin
+      # and with a level of quoting more than every other machine.  The value
+      # is chosen by the target CPU, and a cross build's build JDK, which runs
+      # on the build machine, takes it too: for a 32-bit arm target its
+      # libnio.so could not find libnet.so beside it and the interim jmods
+      # were never made.  Upstream dropped the arm case with JDK-8368102.
+      SET_SHARED_LIBRARY_ORIGIN="-Wl,-z,origin $SET_EXECUTABLE_ORIGIN"
     fi
 
   elif test "x$TOOLCHAIN_TYPE" = xmicrosoft; then
