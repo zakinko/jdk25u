@@ -43,6 +43,52 @@ on:
         required: false
         type: string
         default: '4'
+      parts:
+        description: >-
+          The tier1 parts to run, as a matrix of test-name, test-suite and
+          test-slug.  The default is the twelve groups upstream's test.yml
+          uses, so that a part failing here can be compared with the same
+          part on Linux; jaxp is not among them, its tier1 selects no tests.
+        required: false
+        type: string
+        default: >-
+          {"include":[
+                      {"test-name": "jdk/tier1 part 1", "test-suite": "test/jdk/:tier1_part1", "test-slug": "jdk-part1"},
+                      {"test-name": "jdk/tier1 part 2", "test-suite": "test/jdk/:tier1_part2", "test-slug": "jdk-part2"},
+                      {"test-name": "jdk/tier1 part 3", "test-suite": "test/jdk/:tier1_part3", "test-slug": "jdk-part3"},
+                      {"test-name": "langtools/tier1", "test-suite": "test/langtools/:tier1", "test-slug": "langtools"},
+                      {"test-name": "hs/tier1 common", "test-suite": "test/hotspot/jtreg/:tier1_common", "test-slug": "hs-common"},
+                      {"test-name": "hs/tier1 compiler part 1", "test-suite": "test/hotspot/jtreg/:tier1_compiler_1", "test-slug": "hs-compiler1"},
+                      {"test-name": "hs/tier1 compiler part 2", "test-suite": "test/hotspot/jtreg/:tier1_compiler_2", "test-slug": "hs-compiler2"},
+                      {"test-name": "hs/tier1 compiler part 3", "test-suite": "test/hotspot/jtreg/:tier1_compiler_3", "test-slug": "hs-compiler3"},
+                      {"test-name": "hs/tier1 gc", "test-suite": "test/hotspot/jtreg/:tier1_gc", "test-slug": "hs-gc"},
+                      {"test-name": "hs/tier1 runtime", "test-suite": "test/hotspot/jtreg/:tier1_runtime", "test-slug": "hs-runtime"},
+                      {"test-name": "hs/tier1 serviceability", "test-suite": "test/hotspot/jtreg/:tier1_serviceability", "test-slug": "hs-serviceability"},
+                      {"test-name": "lib-test/tier1", "test-suite": "test/lib-test/:tier1", "test-slug": "lib-test"}]}
+      hotspot-parts-only:
+        description: >-
+          Run only the parts in hotspot-parts.  An aarch64 guest runs under
+          TCG on a runner without /dev/kvm, where jdk/tier1 parts 1 and 2 and
+          langtools/tier1 do not finish in the six hours a job may take, and
+          the rest held the account's few concurrent jobs for as long; what
+          aarch64 has to show is HotSpot's CPU-dependent half, and the library
+          groups are the same tests x86_64 runs.  serviceability is left out
+          as well: the BSD SA is x86_64 only, so it would mostly skip.
+        required: false
+        type: boolean
+        default: false
+      hotspot-parts:
+        description: 'The parts hotspot-parts-only selects'
+        required: false
+        type: string
+        default: >-
+          {"include":[
+                      {"test-name": "hs/tier1 common", "test-suite": "test/hotspot/jtreg/:tier1_common", "test-slug": "hs-common"},
+                      {"test-name": "hs/tier1 compiler part 1", "test-suite": "test/hotspot/jtreg/:tier1_compiler_1", "test-slug": "hs-compiler1"},
+                      {"test-name": "hs/tier1 compiler part 2", "test-suite": "test/hotspot/jtreg/:tier1_compiler_2", "test-slug": "hs-compiler2"},
+                      {"test-name": "hs/tier1 compiler part 3", "test-suite": "test/hotspot/jtreg/:tier1_compiler_3", "test-slug": "hs-compiler3"},
+                      {"test-name": "hs/tier1 gc", "test-suite": "test/hotspot/jtreg/:tier1_gc", "test-slug": "hs-gc"},
+                      {"test-name": "hs/tier1 runtime", "test-suite": "test/hotspot/jtreg/:tier1_runtime", "test-slug": "hs-runtime"}]}
       runner:
         description: 'The GitHub runner to boot the guest on'
         required: false
@@ -56,72 +102,7 @@ jobs:
 
     strategy:
       fail-fast: false
-      matrix:
-        test-name:
-          - 'jdk/tier1 part 1'
-          - 'jdk/tier1 part 2'
-          - 'jdk/tier1 part 3'
-          - 'langtools/tier1'
-          - 'hs/tier1 common'
-          - 'hs/tier1 compiler part 1'
-          - 'hs/tier1 compiler part 2'
-          - 'hs/tier1 compiler part 3'
-          - 'hs/tier1 gc'
-          - 'hs/tier1 runtime'
-          - 'hs/tier1 serviceability'
-          - 'lib-test/tier1'
-
-        # The same twelve groups upstream's test.yml uses, so that a part
-        # failing here can be compared with the same part on Linux. jaxp is
-        # not among them: its tier1 selects no tests.
-        include:
-          - test-name: 'jdk/tier1 part 1'
-            test-suite: 'test/jdk/:tier1_part1'
-            test-slug: 'jdk-part1'
-
-          - test-name: 'jdk/tier1 part 2'
-            test-suite: 'test/jdk/:tier1_part2'
-            test-slug: 'jdk-part2'
-
-          - test-name: 'jdk/tier1 part 3'
-            test-suite: 'test/jdk/:tier1_part3'
-            test-slug: 'jdk-part3'
-
-          - test-name: 'langtools/tier1'
-            test-suite: 'test/langtools/:tier1'
-            test-slug: 'langtools'
-
-          - test-name: 'hs/tier1 common'
-            test-suite: 'test/hotspot/jtreg/:tier1_common'
-            test-slug: 'hs-common'
-
-          - test-name: 'hs/tier1 compiler part 1'
-            test-suite: 'test/hotspot/jtreg/:tier1_compiler_1'
-            test-slug: 'hs-compiler1'
-
-          - test-name: 'hs/tier1 compiler part 2'
-            test-suite: 'test/hotspot/jtreg/:tier1_compiler_2'
-            test-slug: 'hs-compiler2'
-
-          - test-name: 'hs/tier1 compiler part 3'
-            test-suite: 'test/hotspot/jtreg/:tier1_compiler_3'
-            test-slug: 'hs-compiler3'
-
-          - test-name: 'hs/tier1 gc'
-            test-suite: 'test/hotspot/jtreg/:tier1_gc'
-            test-slug: 'hs-gc'
-
-          - test-name: 'hs/tier1 runtime'
-            test-suite: 'test/hotspot/jtreg/:tier1_runtime'
-            test-slug: 'hs-runtime'
-
-          - test-name: 'hs/tier1 serviceability'
-            test-suite: 'test/hotspot/jtreg/:tier1_serviceability'
-            test-slug: 'hs-serviceability'
-
-          - test-name: 'lib-test/tier1'
-            test-suite: 'test/lib-test/:tier1'
-            test-slug: 'lib-test'
+      matrix: ${{ fromJSON(inputs.hotspot-parts-only && inputs.hotspot-parts || inputs.parts) }}
 
     steps:
       - name: 'Checkout the JDK source'

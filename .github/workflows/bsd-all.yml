@@ -156,6 +156,13 @@ jobs:
   # of them gc/epsilon/TestInitAllocs at 480 seconds.  They get three times
   # jtreg's default factor of four.
   #
+  # Even so, jdk/tier1 parts 1 and 2 and langtools/tier1 did not finish in
+  # six hours on the 21 branch's aarch64 guests, and the other parts held
+  # the account's four or so concurrent jobs for hours.  aarch64 runs the
+  # six hs/tier1 parts -- common, compiler 1 to 3, gc and runtime -- which
+  # are what depend on the CPU; the library parts are the same tests the
+  # x86_64 machines run, and serviceability would mostly skip without SA.
+  #
   # Each machine is tested whether or not the others built: one that did not
   # fails at fetching its bundles, and the rest are not held back by it.
   tier1:
@@ -190,3 +197,4 @@ jobs:
       runner: ${{ matrix.runner }}
       release: ${{ matrix.release }}
       timeout-factor: ${{ matrix.timeout-factor }}
+      hotspot-parts-only: ${{ matrix.arch == 'aarch64' }}
