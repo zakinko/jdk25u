@@ -134,6 +134,9 @@ jobs:
   # built; upstream's main.yml does it in its preparation job.
   jtreg:
     name: jtreg
+    concurrency:
+      group: bsd-jtreg-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-24.04
     steps:
       - name: 'Checkout the scripts'
@@ -158,7 +161,13 @@ jobs:
   tier1:
     name: tier1
     needs: [jtreg, hotspot]
-    if: ${{ !cancelled() && needs.jtreg.result == 'success' }}
+    # A newer push cancels this run's builds but not the run, so without the
+    # hotspot check a superseded run still queued its 84 tier1 jobs, each to
+    # fail at fetching bundles that were never made -- and with a handful of
+    # runners for the whole account, they sat in front of the current run's
+    # builds for hours.  A hotspot matrix with some machines failed is
+    # 'failure', not 'cancelled', and the machines that built are tested.
+    if: ${{ !cancelled() && needs.jtreg.result == 'success' && needs.hotspot.result != 'cancelled' }}
     concurrency:
       group: bsd-tier1-${{ github.ref }}-${{ matrix.platform }}
       cancel-in-progress: false
