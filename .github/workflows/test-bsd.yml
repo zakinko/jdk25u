@@ -78,7 +78,10 @@ on:
         type: boolean
         default: false
       hotspot-parts:
-        description: 'The parts hotspot-parts-only selects'
+        description: >-
+          The parts hotspot-parts-only selects.  compiler part 3 is split in
+          three by shard and shards: on the emulated aarch64 guests it ran
+          past the six hours a job may take on all three BSDs.
         required: false
         type: string
         default: >-
@@ -86,7 +89,9 @@ on:
                       {"test-name": "hs/tier1 common", "test-suite": "test/hotspot/jtreg/:tier1_common", "test-slug": "hs-common"},
                       {"test-name": "hs/tier1 compiler part 1", "test-suite": "test/hotspot/jtreg/:tier1_compiler_1", "test-slug": "hs-compiler1"},
                       {"test-name": "hs/tier1 compiler part 2", "test-suite": "test/hotspot/jtreg/:tier1_compiler_2", "test-slug": "hs-compiler2"},
-                      {"test-name": "hs/tier1 compiler part 3", "test-suite": "test/hotspot/jtreg/:tier1_compiler_3", "test-slug": "hs-compiler3"},
+                      {"test-name": "hs/tier1 compiler part 3 (1/3)", "test-suite": "test/hotspot/jtreg/:tier1_compiler_3", "test-slug": "hs-compiler3-1", "shard": 1, "shards": 3},
+                      {"test-name": "hs/tier1 compiler part 3 (2/3)", "test-suite": "test/hotspot/jtreg/:tier1_compiler_3", "test-slug": "hs-compiler3-2", "shard": 2, "shards": 3},
+                      {"test-name": "hs/tier1 compiler part 3 (3/3)", "test-suite": "test/hotspot/jtreg/:tier1_compiler_3", "test-slug": "hs-compiler3-3", "shard": 3, "shards": 3},
                       {"test-name": "hs/tier1 gc", "test-suite": "test/hotspot/jtreg/:tier1_gc", "test-slug": "hs-gc"},
                       {"test-name": "hs/tier1 runtime", "test-suite": "test/hotspot/jtreg/:tier1_runtime", "test-slug": "hs-runtime"}]}
       runner:
@@ -149,7 +154,7 @@ jobs:
           cpu: 4
           usesh: true
           copyback: true
-          envs: 'TEST_SUITE TIMEOUT_FACTOR'
+          envs: 'TEST_SUITE TIMEOUT_FACTOR SHARD SHARDS'
           # -U: the image carries some of these already, and pkg_add
           # refuses a newer version from the mirror without it -- "A
           # different version of bash-5.3.20 is already installed".  The
@@ -172,6 +177,8 @@ jobs:
         env:
           TEST_SUITE: ${{ matrix.test-suite }}
           TIMEOUT_FACTOR: ${{ inputs.timeout-factor }}
+          SHARD: ${{ matrix.shard || 1 }}
+          SHARDS: ${{ matrix.shards || 1 }}
         if: inputs.target-os == 'netbsd'
 
       # jtreg's process tests read /proc, which FreeBSD does not mount.
@@ -184,7 +191,7 @@ jobs:
           cpu: 4
           usesh: true
           copyback: true
-          envs: 'TEST_SUITE TIMEOUT_FACTOR'
+          envs: 'TEST_SUITE TIMEOUT_FACTOR SHARD SHARDS'
           prepare: |
             mount -t procfs proc /proc
             pkg install -y bash gmake zip unzip gsed gnugrep
@@ -192,6 +199,8 @@ jobs:
         env:
           TEST_SUITE: ${{ matrix.test-suite }}
           TIMEOUT_FACTOR: ${{ inputs.timeout-factor }}
+          SHARD: ${{ matrix.shard || 1 }}
+          SHARDS: ${{ matrix.shards || 1 }}
         if: inputs.target-os == 'freebsd'
 
       # OpenBSD refuses a writable and executable mapping on a file system
@@ -206,7 +215,7 @@ jobs:
           cpu: 4
           usesh: true
           copyback: true
-          envs: 'TEST_SUITE TIMEOUT_FACTOR'
+          envs: 'TEST_SUITE TIMEOUT_FACTOR SHARD SHARDS'
           prepare: |
             mount -u -o wxallowed /home
             until pkg_add bash gmake zip unzip-- gsed ggrep libiconv; do
@@ -216,6 +225,8 @@ jobs:
         env:
           TEST_SUITE: ${{ matrix.test-suite }}
           TIMEOUT_FACTOR: ${{ inputs.timeout-factor }}
+          SHARD: ${{ matrix.shard || 1 }}
+          SHARDS: ${{ matrix.shards || 1 }}
         if: inputs.target-os == 'openbsd'
 
       - name: 'Run tests in a DragonFly virtual machine'
@@ -226,13 +237,15 @@ jobs:
           cpu: 4
           usesh: true
           copyback: true
-          envs: 'TEST_SUITE TIMEOUT_FACTOR'
+          envs: 'TEST_SUITE TIMEOUT_FACTOR SHARD SHARDS'
           prepare: |
             pkg install -y bash gmake zip unzip gsed gnugrep
           run: sh .github/scripts/bsd-tier1-in-vm.sh "$TEST_SUITE"
         env:
           TEST_SUITE: ${{ matrix.test-suite }}
           TIMEOUT_FACTOR: ${{ inputs.timeout-factor }}
+          SHARD: ${{ matrix.shard || 1 }}
+          SHARDS: ${{ matrix.shards || 1 }}
         if: inputs.target-os == 'dragonfly'
 
       - name: 'Package test results'
