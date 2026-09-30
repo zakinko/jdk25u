@@ -1167,6 +1167,7 @@ void *os::Bsd::dlopen_helper(const char *filename, int mode, char *ebuf, int ebu
       os::snprintf_checked(ebuf, ebuflen, "%s: file too short", filename);
     }
     log_info(os)("shared library load of %s failed, file too short", filename);
+    result = nullptr;  // the JFR event above reads it when it goes
     return nullptr;
   }
   pthread_mutex_lock(&dragonfly_dl_lock);
