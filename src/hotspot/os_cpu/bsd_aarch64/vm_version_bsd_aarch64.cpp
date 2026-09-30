@@ -634,6 +634,18 @@ void VM_Version::get_os_cpu_info() {
     _features |= check_feature(auxv2, CPU_SVE2,       HWCAP2_SVE2) |
                  check_feature(auxv2, CPU_SVEBITPERM, HWCAP2_SVEBITPERM);
   }
+#ifdef __FreeBSD__
+  // Leave SVE out on FreeBSD for now.  With it, and with the true vector
+  // length, tier1 on a FreeBSD 15.1 guest still computes wrong vector
+  // results -- compiler/runtime/Test7196199, which keeps vectors live across
+  // safepoints, lost lanes ("test_incrv: [0] = 134865.0 != 150000.0") -- and
+  // corrupts strings (TestResolvedJavaMethod: "UnknownFormatConversion
+  // Exception: Conversion = ')'"), in a part NetBSD passes on the same
+  // guest, where no SVE is reported.  Where SVE state is lost between the
+  // kernel and the VM is not known yet; until it is, C2 and the stubs use
+  // NEON, as they do on the other BSDs.
+  _features &= ~(uint64_t)(CPU_SVE | CPU_SVE2 | CPU_SVEBITPERM);
+#endif
 
   // FreeBSD lets EL0 read MIDR_EL1.  OpenBSD does so only when it sets
   // HWCAP_CPUID, and otherwise names the CPU in sysctl hw.model.
