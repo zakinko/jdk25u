@@ -156,6 +156,57 @@ echo "--- end ---"
   grep -E ' (UseSVE|MaxVectorSize|UseSIMDForMemoryOps|UseAVX) ' |
   tee -a "$PWD/setup.txt" || :
 
+# What this kernel sends for a read past the end of a mapped file that was
+# truncated under it.  HotSpot turns that fault, in an unsafe access, into
+# an InternalError (runtime/Unsafe/InternalErrorTest), and takes it to be
+# SIGBUS as on Linux; DragonFly and NetBSD/aarch64 fail that test without
+# a crash.  The base system's cc builds the probe where there is one.
+if command -v cc >/dev/null 2>&1; then
+  cat > "$PWD/mapprobe.c" <<'PROBE'
+#include <fcntl.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
+static sigjmp_buf env;
+static volatile int got_sig, got_code;
+static void h(int sig, siginfo_t *si, void *uc) {
+  (void)uc; got_sig = sig; got_code = si->si_code; siglongjmp(env, 1);
+}
+int main(void) {
+  long pg = sysconf(_SC_PAGESIZE);
+  char path[] = "/tmp/mapprobeXXXXXX";
+  int fd = mkstemp(path);
+  if (fd < 0 || ftruncate(fd, 2 * pg) != 0) { perror("setup"); return 1; }
+  volatile char *p = mmap(NULL, 2 * pg, PROT_READ, MAP_SHARED, fd, 0);
+  if (p == MAP_FAILED) { perror("mmap"); return 1; }
+  if (ftruncate(fd, pg) != 0) { perror("truncate"); return 1; }
+  struct sigaction sa;
+  memset(&sa, 0, sizeof sa);
+  sa.sa_sigaction = h;
+  sa.sa_flags = SA_SIGINFO;
+  sigaction(SIGBUS, &sa, NULL);
+  sigaction(SIGSEGV, &sa, NULL);
+  if (sigsetjmp(env, 1) == 0) {
+    char c = p[pg + 8];
+    printf("read past EOF of a mapped file: no fault, read %d\n", c);
+  } else {
+    printf("read past EOF of a mapped file: %s si_code=%d (SEGV_MAPERR=%d SEGV_ACCERR=%d BUS_ADRERR=%d BUS_OBJERR=%d)\n",
+           got_sig == SIGBUS ? "SIGBUS" : got_sig == SIGSEGV ? "SIGSEGV" : "other",
+           got_code, SEGV_MAPERR, SEGV_ACCERR, BUS_ADRERR, BUS_OBJERR);
+  }
+  unlink(path);
+  return 0;
+}
+PROBE
+  if cc -o "$PWD/mapprobe" "$PWD/mapprobe.c" >/dev/null 2>&1; then
+    "$PWD/mapprobe" 2>&1 | tee -a "$PWD/setup.txt" || :
+  fi
+fi
+
 # A cross build leaves out the default CDS archive -- jdk-options.m4 turns
 # --enable-cds-archive off for cross compilation, since the build cannot run
 # what it built -- and a JDK built on the BSD itself would carry one.  Dump
