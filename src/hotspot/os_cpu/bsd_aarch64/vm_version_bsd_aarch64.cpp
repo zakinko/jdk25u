@@ -635,16 +635,16 @@ void VM_Version::get_os_cpu_info() {
                  check_feature(auxv2, CPU_SVEBITPERM, HWCAP2_SVEBITPERM);
   }
 #ifdef __FreeBSD__
-  // Leave SVE out on FreeBSD for now.  With it, and with the true vector
-  // length, tier1 on a FreeBSD 15.1 guest still computes wrong vector
-  // results -- compiler/runtime/Test7196199, which keeps vectors live across
-  // safepoints, lost lanes ("test_incrv: [0] = 134865.0 != 150000.0") -- and
-  // corrupts strings (TestResolvedJavaMethod: "UnknownFormatConversion
-  // Exception: Conversion = ')'"), in a part NetBSD passes on the same
-  // guest, where no SVE is reported.  Where SVE state is lost between the
-  // kernel and the VM is not known yet; until it is, C2 and the stubs use
-  // NEON, as they do on the other BSDs.
-  _features &= ~(uint64_t)(CPU_SVE | CPU_SVE2 | CPU_SVEBITPERM);
+  // FreeBSD's fixed length can be anything up to 256 bytes, the largest SVE
+  // allows and what QEMU's emulated CPU offers.  C2 at that length gets
+  // wrong vector results -- Test7196199, which keeps vectors live across
+  // safepoints, lost lanes ("test_incrv: [0] = 134865.0 != 150000.0"), and
+  // a JVMCI format string came out altered -- where Linux, whose threads
+  // start at 64 bytes, is not run.  Keep SVE to the lengths a VM is used at
+  // elsewhere, and use NEON beyond them.
+  if ((auxv & HWCAP_SVE) && get_current_sve_vector_length() > 64) {
+    _features &= ~(uint64_t)(CPU_SVE | CPU_SVE2 | CPU_SVEBITPERM);
+  }
 #endif
 
   // FreeBSD lets EL0 read MIDR_EL1.  OpenBSD does so only when it sets
