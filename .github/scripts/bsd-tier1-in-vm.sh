@@ -254,6 +254,14 @@ if [ "${SHARDS:-1}" -gt 1 ]; then
   fi
 fi
 
+if [ "$os" = DragonFly ]; then
+  # jdk/tier1 part 1 takes the whole VM down: ssh stops answering about
+  # three minutes after java/lang/ProcessHandle/InfoTest passes, every time,
+  # and nothing comes back to say which test was running.  One test at a
+  # time, so the last name in the log is the one that does it.
+  case "$suite" in *tier1_part1) extra="$extra;JOBS=1" ;; esac
+fi
+
 gmake test-prebuilt $gnu \
   TEST="$suite" \
   BOOT_JDK="$JDK" \
