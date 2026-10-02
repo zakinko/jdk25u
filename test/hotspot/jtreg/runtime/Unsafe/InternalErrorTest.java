@@ -26,6 +26,10 @@
  * @bug 8191278
  * @requires os.family != "windows"
  * @requires vm.flavor != "zero"
+ * @comment NetBSD/aarch64 raises no fault for a read past the end of a mapped
+ *          file that was truncated: the read returns zeroes, so there is
+ *          no SIGBUS to turn into an InternalError.
+ * @requires !(os.family == "netbsd" & os.arch == "aarch64")
  * @summary Check that SIGBUS errors caused by memory accesses in Unsafe_CopyMemory()
  * and UnsafeCopySwapMemory() get converted to java.lang.InternalError exceptions.
  * @modules java.base/jdk.internal.misc
