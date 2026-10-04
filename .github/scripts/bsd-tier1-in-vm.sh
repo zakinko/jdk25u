@@ -47,13 +47,29 @@ os=`uname -s`
 if [ -f bundles.sha256 ] && command -v sha256sum >/dev/null 2>&1; then
   # A copy the guest damaged fails later in ways that look like JDK bugs --
   # a SIGILL in libjvm, a class file with a bad magic number.  Say so here.
-  rc=0
-  sums=`cd bundles && sha256sum -c ../bundles.sha256 2>&1` || rc=$?
-  if [ $rc -ne 0 ]; then
-    echo "$sums" | grep -v ': OK$' | head -20
-    echo "the JDK bundle arrived in the guest damaged; not running the tests"
-    exit 1
-  fi
+  # The runner also sends the archive the JDK was unpacked from; gzip's
+  # CRC refuses a damaged read of it, so a file that fails its checksum is
+  # taken from there again, a few times, before giving up.
+  try=0
+  while :; do
+    rc=0
+    sums=`cd bundles && sha256sum -c ../bundles.sha256 2>&1` || rc=$?
+    [ $rc -ne 0 ] || break
+    bad=`echo "$sums" | sed -n 's/: FAILED.*$//p'`
+    echo "$sums" | grep -v ': OK$' | head -20 | tee -a "$PWD/setup.txt"
+    try=`expr $try + 1`
+    if [ ! -f jdk-bundle.tar.gz ] || [ $try -gt 3 ] || [ -z "$bad" ]; then
+      echo "the JDK bundle arrived in the guest damaged; not running the tests"
+      exit 1
+    fi
+    for f in $bad; do
+      m=${f#jdk/}
+      rm -f "bundles/$f"
+      tar -xzf jdk-bundle.tar.gz -C bundles/jdk "$m" 2>/dev/null ||
+        tar -xzf jdk-bundle.tar.gz -C bundles/jdk "./$m" || :
+    done
+    echo "took the damaged files from the archive again (try $try)" | tee -a "$PWD/setup.txt"
+  done
   echo "bundle checksums match" >> "$PWD/setup.txt"
 fi
 
