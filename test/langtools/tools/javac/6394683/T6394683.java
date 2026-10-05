@@ -25,6 +25,10 @@
  * @test
  * @bug 6394683
  * @summary need to resolve different file-type precedence semantics for javac and 269
+ * @comment DragonFly leaves the mtime of an empty file alone when it is opened
+ *          again with O_TRUNC, so the empty B.class this test recreates never
+ *          becomes newer than the other file.
+ * @requires os.family != "dragonfly"
  * @modules java.compiler
  *          jdk.compiler
  */
