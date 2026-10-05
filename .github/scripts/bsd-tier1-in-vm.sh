@@ -200,6 +200,31 @@ echo "--- end ---"
   grep -E ' (UseSVE|MaxVectorSize|UseSIMDForMemoryOps|UseAVX) ' |
   tee -a "$PWD/setup.txt" || :
 
+# compiler/loopopts/TestMaxLoopOptsCountReached runs in 100 seconds on the
+# NetBSD/aarch64 guest, and times out on the OpenBSD one with C2 still on
+# its one -Xcomp compile after 1448 seconds of CPU; OpenBSD alone takes
+# its CPU for one that wants UseSIMDForMemoryOps.  Time the same fixed C2
+# work on each guest, with that flag as found and turned off, to see
+# whether the guest or the flag is behind it.  Only in the shard that
+# holds the test, to keep the others' time.
+case "`uname -m`" in
+  aarch64|arm64|evbarm)
+    case "$suite:${SHARD:-1}" in *tier1_compiler_3:3)
+      sysctl hw.model 2>/dev/null | tee -a "$PWD/setup.txt" || :
+      "$JDK/bin/java" -Xlog:os+cpu -version 2>&1 | grep -E '^\[.*\]\[os,cpu' | head -3 |
+        tee -a "$PWD/setup.txt" || :
+      for f in -XX:+UseSIMDForMemoryOps -XX:-UseSIMDForMemoryOps; do
+        s=`date +%s`
+        "$JDK/bin/java" $f -XX:-TieredCompilation -Xcomp \
+            -XX:CompileOnly=java.lang.String::* -XX:+CITime -version \
+            > "$PWD/c2probe.txt" 2>&1 || :
+        e=`date +%s`
+        echo "C2 probe $f: `expr $e - $s` s wall; `grep -m1 -E '^ +C2 [{]' "$PWD/c2probe.txt" | sed 's/; nmethods.*//'`" |
+          tee -a "$PWD/setup.txt"
+      done ;;
+    esac ;;
+esac
+
 # What this kernel sends for a read past the end of a mapped file that was
 # truncated under it.  HotSpot turns that fault, in an unsafe access, into
 # an InternalError (runtime/Unsafe/InternalErrorTest), and takes it to be
