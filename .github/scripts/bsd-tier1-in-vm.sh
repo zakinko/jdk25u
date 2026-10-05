@@ -251,6 +251,50 @@ PROBE
   fi
 fi
 
+# java/lang/ProcessHandle/InfoTest fails on NetBSD/amd64 with "timeout
+# waiting for process to terminate" after Process.destroy(), and prints the
+# child's start time as a day or so after 1970.  ProcessHandle signals a
+# pid only while the start time it reads from kinfo_proc2 still matches
+# the one it read first, so a start time that moves would leave the child
+# alive.  Read a child's the way the JDK does, a few times over three
+# seconds, next to the clock and the boot time.
+if [ "$os" = NetBSD ] && command -v cc >/dev/null 2>&1; then
+  cat > "$PWD/startprobe.c" <<'PROBE'
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#include <sys/time.h>
+#include <signal.h>
+#include <stdio.h>
+#include <unistd.h>
+int main(void) {
+  pid_t pid = fork();
+  if (pid == 0) { execl("/bin/sleep", "sleep", "10", (char *)NULL); _exit(1); }
+  struct timeval bt; size_t btl = sizeof bt;
+  int bmib[2] = {CTL_KERN, KERN_BOOTTIME};
+  sysctl(bmib, 2, &bt, &btl, NULL, 0);
+  for (int i = 0; i < 4; i++) {
+    struct kinfo_proc2 kp; size_t len = sizeof kp;
+    int mib[6] = {CTL_KERN, KERN_PROC2, KERN_PROC_PID, pid, sizeof kp, 1};
+    struct timeval now; gettimeofday(&now, NULL);
+    if (sysctl(mib, 6, &kp, &len, NULL, 0) == -1) { perror("sysctl"); break; }
+    printf("start time probe: uvalid %d start %llu.%06llu (ms %lld) now %lld boottime %lld\n",
+           (int)kp.p_uvalid, (unsigned long long)kp.p_ustart_sec,
+           (unsigned long long)kp.p_ustart_usec,
+           (long long)kp.p_ustart_sec * 1000 + kp.p_ustart_usec / 1000,
+           (long long)now.tv_sec, (long long)bt.tv_sec);
+    sleep(1);
+  }
+  kill(pid, SIGKILL);
+  return 0;
+}
+PROBE
+  if cc -o "$PWD/startprobe" "$PWD/startprobe.c" >"$PWD/startprobe.log" 2>&1; then
+    "$PWD/startprobe" 2>&1 | tee -a "$PWD/setup.txt" || :
+  else
+    { echo "start time probe did not build:"; tail -5 "$PWD/startprobe.log"; } | tee -a "$PWD/setup.txt"
+  fi
+fi
+
 # A cross build leaves out the default CDS archive -- jdk-options.m4 turns
 # --enable-cds-archive off for cross compilation, since the build cannot run
 # what it built -- and a JDK built on the BSD itself would carry one.  Dump
