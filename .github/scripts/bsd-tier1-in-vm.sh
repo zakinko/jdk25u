@@ -59,6 +59,12 @@ if [ -f bundles.sha256 ] && command -v sha256sum >/dev/null 2>&1; then
     echo "$sums" | grep -v ': OK$' | head -20 | tee -a "$PWD/setup.txt"
     try=`expr $try + 1`
     if [ ! -f jdk-bundle.tar.gz ] || [ $try -gt 3 ] || [ -z "$bad" ]; then
+      # Files that come up short ("Truncated input file (needed 138966016
+      # bytes, only 0 available)") are what a full disk leaves behind;
+      # say how full it is and what the workspace takes.
+      df -k . /tmp 2>&1 | sed 's/^/  df: /'
+      du -sk * .git 2>/dev/null | sort -n | tail -8 | sed 's/^/  du: /'
+      ls -l jdk-bundle.tar.gz 2>&1 | sed 's/^/  /'
       echo "the JDK bundle arrived in the guest damaged; not running the tests"
       exit 1
     fi
@@ -71,6 +77,7 @@ if [ -f bundles.sha256 ] && command -v sha256sum >/dev/null 2>&1; then
     echo "took the damaged files from the archive again (try $try)" | tee -a "$PWD/setup.txt"
   done
   echo "bundle checksums match" >> "$PWD/setup.txt"
+  df -k . 2>&1 | tail -1 | sed 's/^/df: /' >> "$PWD/setup.txt"
 fi
 
 if [ "$os" = NetBSD ]; then
