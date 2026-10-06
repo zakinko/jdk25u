@@ -130,11 +130,7 @@ jobs:
       # test ran.  The archives the bundles were unpacked from are not
       # needed there either.
       - name: 'Leave the symbols and the archives out of the guest'
-        run: |
-          if [ '${{ inputs.target-os }}' = freebsd ]; then
-            cp bundles/jdk-${{ inputs.platform }}.tar.gz jdk-bundle.tar.gz
-          fi
-          rm -rf bundles/symbols bundles/*.tar.gz
+        run: rm -rf bundles/symbols bundles/*.tar.gz
 
       # The FreeBSD aarch64 guest has been handed corrupt copies:
       #   tar: Damaged tar archive (bad header checksum)
@@ -142,19 +138,24 @@ jobs:
       # and libjvm SIGILLs on its first run with no copy error at all, and
       # jlink, reading the jmods, said "invalid distance too far back".  ssh
       # would have caught damage in transit, so it happens in the guest.
-      # Record what the JDK should look like, for the guest to check.  A
-      # file that fails the check is taken again from the JDK's archive,
-      # kept outside bundles/ by the step above, so that one damaged file
-      # ("lib/modules: FAILED", on a run where nothing else was wrong) does
-      # not cost the whole job.
+      # Record what the JDK should look like, for the guest to check.
       - name: 'Record the checksums of the JDK bundle'
         run: |
           cd bundles
           find jdk -type f \( -name '*.so' -o -name modules -o -name '*.jmod' -o -path '*/bin/*' \) -print0 |
             xargs -0 sha256sum > ../bundles.sha256
           wc -l ../bundles.sha256
-          ls -l ../jdk-bundle.tar.gz
-          tar -tzf ../jdk-bundle.tar.gz | head -3
+        if: inputs.target-os == 'freebsd'
+
+      # For the guest to fetch a damaged file again from, at 10.0.2.2, which
+      # QEMU's user-mode network maps to the runner's loopback.  One damaged
+      # file ("lib/modules: FAILED", on a run where nothing else was wrong)
+      # should not cost the whole job.  The server outlives the step; the
+      # runner ends it with the job.
+      - name: 'Serve the JDK bundle to the guest'
+        run: |
+          cd bundles
+          nohup python3 -m http.server 8642 --bind 127.0.0.1 > /dev/null 2>&1 &
         if: inputs.target-os == 'freebsd'
 
       # Whether the guest is accelerated decides whether a six-hour job is

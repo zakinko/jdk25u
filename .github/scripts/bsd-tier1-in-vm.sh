@@ -47,9 +47,10 @@ os=`uname -s`
 if [ -f bundles.sha256 ] && command -v sha256sum >/dev/null 2>&1; then
   # A copy the guest damaged fails later in ways that look like JDK bugs --
   # a SIGILL in libjvm, a class file with a bad magic number.  Say so here.
-  # The runner also sends the archive the JDK was unpacked from; gzip's
-  # CRC refuses a damaged read of it, so a file that fails its checksum is
-  # taken from there again, a few times, before giving up.
+  # The runner serves the bundles on its loopback, which the guest reaches
+  # as 10.0.2.2; a file that fails its checksum is fetched from there
+  # again, a few times, before giving up.  Where the two copies differ --
+  # what the damage looks like -- is the lead on where it comes from.
   try=0
   while :; do
     rc=0
@@ -58,23 +59,26 @@ if [ -f bundles.sha256 ] && command -v sha256sum >/dev/null 2>&1; then
     bad=`echo "$sums" | sed -n 's/: FAILED.*$//p'`
     echo "$sums" | grep -v ': OK$' | head -20 | tee -a "$PWD/setup.txt"
     try=`expr $try + 1`
-    if [ ! -f jdk-bundle.tar.gz ] || [ $try -gt 3 ] || [ -z "$bad" ]; then
-      # Files that come up short ("Truncated input file (needed 138966016
-      # bytes, only 0 available)") are what a full disk leaves behind;
-      # say how full it is and what the workspace takes.
+    if [ $try -gt 3 ] || [ -z "$bad" ]; then
+      # Files cut short ("Truncated input file") are what a full disk
+      # leaves behind; say how full it is and what the workspace takes.
       df -k . /tmp 2>&1 | sed 's/^/  df: /'
       du -sk * .git 2>/dev/null | sort -n | tail -8 | sed 's/^/  du: /'
-      ls -l jdk-bundle.tar.gz 2>&1 | sed 's/^/  /'
       echo "the JDK bundle arrived in the guest damaged; not running the tests"
       exit 1
     fi
     for f in $bad; do
-      m=${f#jdk/}
-      rm -f "bundles/$f"
-      tar -xzf jdk-bundle.tar.gz -C bundles/jdk "$m" 2>/dev/null ||
-        tar -xzf jdk-bundle.tar.gz -C bundles/jdk "./$m" || :
+      if fetch -q -o "bundles/$f.new" "http://10.0.2.2:8642/$f"; then
+        n=`cmp -l "bundles/$f" "bundles/$f.new" 2>/dev/null | wc -l`
+        echo "$f: `ls -l "bundles/$f" | awk '{print $5}'` bytes here, `ls -l "bundles/$f.new" | awk '{print $5}'` fetched, $n differ; the first (offset, damaged, good, octal):" |
+          tee -a "$PWD/setup.txt"
+        cmp -l "bundles/$f" "bundles/$f.new" 2>&1 | head -4 | tee -a "$PWD/setup.txt"
+        mv "bundles/$f.new" "bundles/$f"
+      else
+        echo "$f: could not fetch it again from the runner" | tee -a "$PWD/setup.txt"
+      fi
     done
-    echo "took the damaged files from the archive again (try $try)" | tee -a "$PWD/setup.txt"
+    echo "fetched the damaged files again from the runner (try $try)" | tee -a "$PWD/setup.txt"
   done
   echo "bundle checksums match" >> "$PWD/setup.txt"
   df -k . 2>&1 | tail -1 | sed 's/^/df: /' >> "$PWD/setup.txt"
