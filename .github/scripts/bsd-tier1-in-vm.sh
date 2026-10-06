@@ -370,6 +370,18 @@ int main(void) {
     printf("start time probe: SIGTERM to the spawned child: %s\n",
            WIFSIGNALED(st) ? "it died" : "it lived");
   }
+  /* The JDK reads the start time once jspawnhelper has said it is alive,
+     and jspawnhelper then execs the program; read it before and after
+     an exec in the same process. */
+  char *argv2[] = {"sh", "-c", "sleep 1; exec /bin/sleep 5", NULL};
+  if (posix_spawn(&pid, "/bin/sh", NULL, NULL, argv2, environ) != 0) {
+    perror("posix_spawn"); return 0;
+  }
+  usleep(300000);
+  show("before exec", pid, bt.tv_sec);
+  sleep(2);
+  show("after exec", pid, bt.tv_sec);
+  kill(pid, SIGKILL);
   return 0;
 }
 PROBE
