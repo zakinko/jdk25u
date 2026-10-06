@@ -288,28 +288,49 @@ if [ "$os" = NetBSD ] && command -v cc >/dev/null 2>&1; then
 #include <sys/param.h>
 #include <sys/sysctl.h>
 #include <sys/time.h>
+#include <sys/wait.h>
 #include <signal.h>
+#include <spawn.h>
 #include <stdio.h>
 #include <unistd.h>
+extern char **environ;
+static void show(const char *how, pid_t pid, long long bt) {
+  struct kinfo_proc2 kp; size_t len = sizeof kp;
+  int mib[6] = {CTL_KERN, KERN_PROC2, KERN_PROC_PID, pid, sizeof kp, 1};
+  struct timeval now; gettimeofday(&now, NULL);
+  if (sysctl(mib, 6, &kp, &len, NULL, 0) == -1) { perror("sysctl"); return; }
+  printf("start time probe (%s): stat %d uvalid %d start %llu.%06llu (ms %lld) now %lld.%06ld boottime %lld\n",
+         how, (int)kp.p_stat, (int)kp.p_uvalid, (unsigned long long)kp.p_ustart_sec,
+         (unsigned long long)kp.p_ustart_usec,
+         (long long)kp.p_ustart_sec * 1000 + kp.p_ustart_usec / 1000,
+         (long long)now.tv_sec, (long)now.tv_usec, bt);
+}
 int main(void) {
-  pid_t pid = fork();
-  if (pid == 0) { execl("/bin/sleep", "sleep", "10", (char *)NULL); _exit(1); }
   struct timeval bt; size_t btl = sizeof bt;
   int bmib[2] = {CTL_KERN, KERN_BOOTTIME};
   sysctl(bmib, 2, &bt, &btl, NULL, 0);
-  for (int i = 0; i < 4; i++) {
-    struct kinfo_proc2 kp; size_t len = sizeof kp;
-    int mib[6] = {CTL_KERN, KERN_PROC2, KERN_PROC_PID, pid, sizeof kp, 1};
-    struct timeval now; gettimeofday(&now, NULL);
-    if (sysctl(mib, 6, &kp, &len, NULL, 0) == -1) { perror("sysctl"); break; }
-    printf("start time probe: uvalid %d start %llu.%06llu (ms %lld) now %lld boottime %lld\n",
-           (int)kp.p_uvalid, (unsigned long long)kp.p_ustart_sec,
-           (unsigned long long)kp.p_ustart_usec,
-           (long long)kp.p_ustart_sec * 1000 + kp.p_ustart_usec / 1000,
-           (long long)now.tv_sec, (long long)bt.tv_sec);
-    sleep(1);
-  }
+  pid_t pid = fork();
+  if (pid == 0) { execl("/bin/sleep", "sleep", "10", (char *)NULL); _exit(1); }
+  for (int i = 0; i < 3; i++) { show("fork", pid, bt.tv_sec); sleep(1); }
   kill(pid, SIGKILL);
+  /* The JDK starts children with posix_spawn, which NetBSD does in the
+     kernel; read the child the moment the call returns, as ProcessImpl
+     does when it makes the child's handle, and again later. */
+  char *argv[] = {"sleep", "10", NULL};
+  if (posix_spawn(&pid, "/bin/sleep", NULL, NULL, argv, environ) != 0) {
+    perror("posix_spawn"); return 0;
+  }
+  show("posix_spawn, at once", pid, bt.tv_sec);
+  show("posix_spawn, at once", pid, bt.tv_sec);
+  usleep(200000);
+  show("posix_spawn, 0.2s", pid, bt.tv_sec);
+  sleep(1);
+  show("posix_spawn, 1.2s", pid, bt.tv_sec);
+  if (kill(pid, SIGTERM) == 0) {
+    int st; waitpid(pid, &st, 0);
+    printf("start time probe: SIGTERM to the spawned child: %s\n",
+           WIFSIGNALED(st) ? "it died" : "it lived");
+  }
   return 0;
 }
 PROBE
