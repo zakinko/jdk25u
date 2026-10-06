@@ -148,14 +148,20 @@ jobs:
         if: inputs.target-os == 'freebsd'
 
       # For the guest to fetch a damaged file again from, at 10.0.2.2, which
-      # QEMU's user-mode network maps to the runner's loopback.  One damaged
+      # QEMU's user-mode network maps to the runner's loopback; it listens on
+      # every address in case the guest's network reaches the runner some
+      # other way.  One damaged
       # file ("lib/modules: FAILED", on a run where nothing else was wrong)
       # should not cost the whole job.  The server outlives the step; the
       # runner ends it with the job.
       - name: 'Serve the JDK bundle to the guest'
         run: |
           cd bundles
-          nohup python3 -m http.server 8642 --bind 127.0.0.1 > /dev/null 2>&1 &
+          nohup python3 -m http.server 8642 --bind 0.0.0.0 > ../http.log 2>&1 &
+          sleep 2
+          curl -sS -o /dev/null -w 'bundle server: HTTP %{http_code} for /jdk/ on 127.0.0.1\n' \
+              http://127.0.0.1:8642/jdk/ || echo "bundle server: not answering on 127.0.0.1"
+          hostname -I 2>/dev/null | sed 's/^/runner addresses: /'
         if: inputs.target-os == 'freebsd'
 
       # Whether the guest is accelerated decides whether a six-hour job is

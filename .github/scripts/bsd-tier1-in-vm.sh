@@ -76,6 +76,14 @@ if [ -f bundles.sha256 ] && command -v sha256sum >/dev/null 2>&1; then
         mv "bundles/$f.new" "bundles/$f"
       else
         echo "$f: could not fetch it again from the runner" | tee -a "$PWD/setup.txt"
+        # Where the guest's traffic goes, and whether the server answers
+        # at all, to see which of the two is missing.
+        netstat -rn -f inet 2>/dev/null | grep -E '^(default|0\.0\.0\.0)' | sed 's/^/  route: /'
+        if r=`fetch -q -T 10 -o /dev/null http://10.0.2.2:8642/ 2>&1`; then
+          echo "  the server's root answers"
+        else
+          echo "  the server's root does not answer either: $r"
+        fi
       fi
     done
     echo "fetched the damaged files again from the runner (try $try)" | tee -a "$PWD/setup.txt"
