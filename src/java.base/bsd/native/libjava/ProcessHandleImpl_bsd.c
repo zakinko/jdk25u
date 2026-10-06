@@ -217,7 +217,7 @@ jint os_getChildren(JNIEnv *env, jlong jpid, jlongArray jarray,
                     }
                     if (stimes != NULL) {
                         // Store the process start time
-                        jlong startTime = kp->KI_START_SEC * 1000 +
+                        jlong startTime = (jlong) kp->KI_START_SEC * 1000 +
                                           kp->KI_START_USEC / 1000;
                         stimes[count] = startTime;
                     }
@@ -285,8 +285,10 @@ pid_t os_getParentPidAndTimings(JNIEnv *env, pid_t jpid,
         return -1;
     }
     if (bufSize > 0 && kp.KI_PID == pid) {
-        *startTime = (jlong) (kp.KI_START_SEC * 1000 +
-                              kp.KI_START_USEC / 1000);
+        // NetBSD's kinfo_proc2 keeps the seconds in 32 bits; widen them
+        // before scaling, or the milliseconds wrap every 49.7 days.
+        *startTime = (jlong) kp.KI_START_SEC * 1000 +
+                     kp.KI_START_USEC / 1000;
         ppid = kp.KI_PPID;
     }
 
