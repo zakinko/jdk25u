@@ -207,6 +207,26 @@ echo "--- end ---"
   grep -E ' (UseSVE|MaxVectorSize|UseSIMDForMemoryOps|UseAVX) ' |
   tee -a "$PWD/setup.txt" || :
 
+# runtime/CompressedOops/CompressedClassPointers fails on FreeBSD/aarch64
+# alone: with a 128M heap the class space should land below 4G, for a
+# zero narrow klass base, and lands at 0x00000ff000000000 instead.  Log
+# every attempt the VM makes to reserve it, and what a process here has
+# mapped at its low end, to see what is in the way.
+if [ "$os" = FreeBSD ] && [ "`uname -m`" = arm64 ]; then
+  case "$suite" in *tier1_runtime)
+    "$JDK/bin/java" -XX:+UnlockDiagnosticVMOptions -XX:SharedBaseAddress=8g \
+        -Xmx128m -Xshare:off -Xlog:os+map=debug,metaspace+map=debug,gc+metaspace=info \
+        -XX:+PrintFlagsFinal -version > "$PWD/ccsprobe.txt" 2>&1 || :
+    grep -E 'reserve|Narrow klass base|Compressed class space|Heap address| HeapBaseMinAddress ' \
+        "$PWD/ccsprobe.txt" | head -40 | sed 's/^/ccs probe: /' | tee -a "$PWD/setup.txt"
+    sysctl kern.elf64.aslr.enable kern.elf64.aslr.pie_enable vm.max_user_wired \
+        2>&1 | sed 's/^/ccs probe: /' | tee -a "$PWD/setup.txt" || :
+    # What else is mapped low: this shell's own map, as a stand-in.
+    procstat -v $$ 2>/dev/null | head -12 | sed 's/^/ccs probe: /' |
+      tee -a "$PWD/setup.txt" || :
+  ;; esac
+fi
+
 # compiler/loopopts/TestMaxLoopOptsCountReached runs in 100 seconds on the
 # NetBSD/aarch64 guest, and times out on the OpenBSD one with C2 still on
 # its one -Xcomp compile after 1448 seconds of CPU; OpenBSD alone takes
