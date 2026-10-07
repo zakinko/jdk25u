@@ -223,6 +223,44 @@ echo "--- end ---"
   grep -E ' (UseSVE|MaxVectorSize|UseSIMDForMemoryOps|UseAVX) ' |
   tee -a "$PWD/setup.txt" || :
 
+# InfoTest's test3 on NetBSD: Process.destroy() leaves "sleep" running,
+# though a sleep the probe above spawns dies of SIGTERM.  Do what the test
+# does, through the JDK, a few times: start sleep, destroy it, wait, and
+# say what the handle saw and whether the process went.
+if [ "$os" = NetBSD ]; then
+  mkdir -p "$PWD/destroyprobe"
+  cat > "$PWD/destroyprobe/DestroyProbe.java" <<'PROBE'
+import java.util.concurrent.TimeUnit;
+public class DestroyProbe {
+    public static void main(String[] args) throws Exception {
+        System.out.println("destroy probe: launchMechanism "
+                + System.getProperty("jdk.lang.Process.launchMechanism", "(default)"));
+        for (int i = 0; i < 5; i++) {
+            Process p = new ProcessBuilder("sleep", "60").start();
+            ProcessHandle h = p.toHandle();
+            String before = String.valueOf(h.info().startInstant());
+            long t0 = System.nanoTime();
+            p.destroy();
+            boolean gone = p.waitFor(15, TimeUnit.SECONDS);
+            long ms = (System.nanoTime() - t0) / 1_000_000;
+            String after = String.valueOf(ProcessHandle.of(p.pid())
+                    .map(x -> x.info().startInstant().toString()).orElse("(gone)"));
+            System.out.println("destroy probe: pid " + p.pid() + " start " + before
+                    + " -> " + after + ", destroy then wait: " + (gone ? "exited" : "STILL ALIVE")
+                    + " after " + ms + " ms");
+            if (!gone) {
+                boolean sent = ProcessHandle.of(p.pid()).map(ProcessHandle::destroy).orElse(false);
+                System.out.println("destroy probe: ProcessHandle.of(pid).destroy() returned " + sent
+                        + ", exited within 5s: " + p.waitFor(5, TimeUnit.SECONDS));
+                p.destroyForcibly().waitFor();
+            }
+        }
+    }
+}
+PROBE
+  "$JDK/bin/java" "$PWD/destroyprobe/DestroyProbe.java" 2>&1 | tail -12 | tee -a "$PWD/setup.txt" || :
+fi
+
 # runtime/CompressedOops/CompressedClassPointers fails on FreeBSD/aarch64
 # alone: with a 128M heap the class space should land below 4G, for a
 # zero narrow klass base, and lands at 0x00000ff000000000 instead.  Log
@@ -240,6 +278,31 @@ if [ "$os" = FreeBSD ] && [ "`uname -m`" = arm64 ]; then
     grep -c 'mmap failed' "$PWD/ccsprobe.txt" | sed 's/^/ccs probe: failed mmaps: /' | tee -a "$PWD/setup.txt"
     sysctl kern.elf64.aslr.enable kern.elf64.aslr.pie_enable vm.max_user_wired \
         2>&1 | sed 's/^/ccs probe: /' | tee -a "$PWD/setup.txt" || :
+    # Every attempt below 4G failed with ENOMEM, which mmap returns for an
+    # address outside the process's map; ask the kernel where the map
+    # starts.
+    cat > "$PWD/vmlayout.c" <<'PROBE'
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#include <sys/user.h>
+#include <stdio.h>
+#include <unistd.h>
+int main(void) {
+  struct kinfo_vm_layout l;
+  size_t len = sizeof l;
+  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_VM_LAYOUT, getpid()};
+  if (sysctl(mib, 4, &l, &len, NULL, 0) == -1) { perror("vm_layout"); return 1; }
+  printf("min user address 0x%lx, max 0x%lx, text 0x%lx, map flags 0x%x\n",
+         (unsigned long)l.kvm_min_user_addr, (unsigned long)l.kvm_max_user_addr,
+         (unsigned long)l.kvm_text_addr, l.kvm_map_flags);
+  return 0;
+}
+PROBE
+    if cc -o "$PWD/vmlayout" "$PWD/vmlayout.c" > "$PWD/vmlayout.log" 2>&1; then
+      "$PWD/vmlayout" 2>&1 | sed 's/^/ccs probe: /' | tee -a "$PWD/setup.txt"
+    else
+      tail -3 "$PWD/vmlayout.log" | sed 's/^/ccs probe: vmlayout did not build: /' | tee -a "$PWD/setup.txt"
+    fi
     # What else is mapped low: this shell's own map, as a stand-in.
     procstat -v $$ 2>/dev/null | head -12 | sed 's/^/ccs probe: /' |
       tee -a "$PWD/setup.txt" || :
