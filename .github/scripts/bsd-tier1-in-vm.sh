@@ -227,10 +227,13 @@ echo "--- end ---"
 if [ "$os" = FreeBSD ] && [ "`uname -m`" = arm64 ]; then
   case "$suite" in *tier1_runtime)
     "$JDK/bin/java" -XX:+UnlockDiagnosticVMOptions -XX:SharedBaseAddress=8g \
-        -Xmx128m -Xshare:off -Xlog:os+map=debug,metaspace+map=debug,gc+metaspace=info \
+        -Xmx128m -Xshare:off -Xlog:os+map=trace,metaspace+map=debug,gc+metaspace=info \
         -XX:+PrintFlagsFinal -version > "$PWD/ccsprobe.txt" 2>&1 || :
-    grep -E 'reserve|Narrow klass base|Compressed class space|Heap address| HeapBaseMinAddress ' \
+    # os+map at trace says why each attempt below 4G failed ("mmap failed:
+    # ... errno=(...)"); the attempts come in the order they were made.
+    grep -E 'reserve|mmap failed|Narrow klass base|Compressed class space|Heap address| HeapBaseMinAddress ' \
         "$PWD/ccsprobe.txt" | head -40 | sed 's/^/ccs probe: /' | tee -a "$PWD/setup.txt"
+    grep -c 'mmap failed' "$PWD/ccsprobe.txt" | sed 's/^/ccs probe: failed mmaps: /' | tee -a "$PWD/setup.txt"
     sysctl kern.elf64.aslr.enable kern.elf64.aslr.pie_enable vm.max_user_wired \
         2>&1 | sed 's/^/ccs probe: /' | tee -a "$PWD/setup.txt" || :
     # What else is mapped low: this shell's own map, as a stand-in.
