@@ -47,10 +47,14 @@ os=`uname -s`
 if [ -f bundles.sha256 ] && command -v sha256sum >/dev/null 2>&1; then
   # A copy the guest damaged fails later in ways that look like JDK bugs --
   # a SIGILL in libjvm, a class file with a bad magic number.  Say so here.
-  # The runner serves the bundles on its loopback, which the guest reaches
-  # as 10.0.2.2; a file that fails its checksum is fetched from there
-  # again, a few times, before giving up.  Where the two copies differ --
+  # The runner serves the bundles; QEMU's user-mode network takes the
+  # guest's gateway to the runner's loopback.  That is 10.0.2.2 by QEMU's
+  # default, and 192.168.122.2 the way vmactions sets the network up, so
+  # ask the routing table.  A file that fails its checksum is fetched from
+  # there again, a few times, before giving up.  Where the two copies differ --
   # what the damage looks like -- is the lead on where it comes from.
+  gw=`netstat -rn -f inet 2>/dev/null | awk '$1 == "default" { print $2; exit }'`
+  server="http://${gw:-10.0.2.2}:8642"
   try=0
   while :; do
     rc=0
@@ -68,7 +72,7 @@ if [ -f bundles.sha256 ] && command -v sha256sum >/dev/null 2>&1; then
       exit 1
     fi
     for f in $bad; do
-      if fetch -q -o "bundles/$f.new" "http://10.0.2.2:8642/$f"; then
+      if fetch -q -o "bundles/$f.new" "$server/$f"; then
         n=`cmp -l "bundles/$f" "bundles/$f.new" 2>/dev/null | wc -l`
         echo "$f: `ls -l "bundles/$f" | awk '{print $5}'` bytes here, `ls -l "bundles/$f.new" | awk '{print $5}'` fetched, $n differ; the first (offset, damaged, good, octal):" |
           tee -a "$PWD/setup.txt"
@@ -79,7 +83,7 @@ if [ -f bundles.sha256 ] && command -v sha256sum >/dev/null 2>&1; then
         # Where the guest's traffic goes, and whether the server answers
         # at all, to see which of the two is missing.
         netstat -rn -f inet 2>/dev/null | grep -E '^(default|0\.0\.0\.0)' | sed 's/^/  route: /'
-        if r=`fetch -q -T 10 -o /dev/null http://10.0.2.2:8642/ 2>&1`; then
+        if r=`fetch -q -T 10 -o /dev/null "$server/" 2>&1`; then
           echo "  the server's root answers"
         else
           echo "  the server's root does not answer either: $r"

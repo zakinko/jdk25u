@@ -147,11 +147,10 @@ jobs:
           wc -l ../bundles.sha256
         if: inputs.target-os == 'freebsd'
 
-      # For the guest to fetch a damaged file again from, at 10.0.2.2, which
-      # QEMU's user-mode network maps to the runner's loopback; it listens on
-      # every address in case the guest's network reaches the runner some
-      # other way.  One damaged
-      # file ("lib/modules: FAILED", on a run where nothing else was wrong)
+      # For the guest to fetch a damaged file again from, at its gateway,
+      # which QEMU's user-mode network maps to the runner's loopback
+      # (192.168.122.2 as vmactions sets it up).  One damaged file
+      # ("lib/modules: FAILED", on a run where nothing else was wrong)
       # should not cost the whole job.  The server outlives the step; the
       # runner ends it with the job.
       - name: 'Serve the JDK bundle to the guest'
