@@ -484,6 +484,7 @@ if command -v ggrep >/dev/null 2>&1; then gnu="$gnu GREP=`command -v ggrep`"; fi
 # them as problems.  jtreg -l names the tests the part selects, after the
 # keywords and @requires, so the split is of what would really run.
 extra=""
+monitor=""
 if [ "${SHARDS:-1}" -gt 1 ]; then
   root=${suite%%:*}
   "$JDK/bin/java" -jar "$JT/lib/jtreg.jar" -l -jdk:"$JDK" -k:'!headful' \
@@ -515,6 +516,21 @@ if [ "$os" = DragonFly ]; then
   # and nothing comes back to say which test was running.  One test at a
   # time, so the last name in the log is the one that does it.
   case "$suite" in *tier1_part1) extra="$extra;JOBS=1" ;; esac
+  # Twice now the machine has gone just after InfoTest passed, as jtreg
+  # moved on to java/lang/ProcessHandle/OnExitTest, which builds trees of
+  # processes, kills them and waits for each.  Say every half minute how
+  # many processes there are and how much memory is free, so the last
+  # lines before the silence show whether something ran out.
+  case "$suite" in *tier1_part1)
+    ( while sleep 30; do
+        n=`ps ax 2>/dev/null | wc -l`
+        f=`sysctl -n vm.stats.vm.v_free_count 2>/dev/null`
+        j=`ps ax -o comm 2>/dev/null | grep -c '^java'`
+        echo "monitor: `date +%H:%M:%S` processes $n, java $j, free pages $f"
+        ps ax -o pid,ppid,rss,etime,command 2>/dev/null | sort -k3 -n -r | sed -n '2,3p' | cut -c1-140 | sed 's/^/monitor:   /'
+      done ) &
+    monitor=$!
+  ;; esac
 fi
 
 gmake test-prebuilt $gnu \
@@ -524,6 +540,8 @@ gmake test-prebuilt $gnu \
   JDK_IMAGE_DIR="$JDK" \
   TEST_IMAGE_DIR="$TESTS" \
   JTREG="JAVA_OPTIONS=-XX:-CreateCoredumpOnCrash;VERBOSE=fail,error,time;KEYWORDS=!headful;TIMEOUT_FACTOR=${TIMEOUT_FACTOR:-4}$extra"
+
+[ -z "$monitor" ] || kill $monitor 2>/dev/null || :
 
 # make test-prebuilt prints "TEST FAILURE" and then returns 0: it reports
 # the failure as build/run-test-prebuilt/make-support/exit-with-error.
