@@ -523,11 +523,11 @@ if [ "$os" = DragonFly ]; then
   # lines before the silence show whether something ran out.
   case "$suite" in *tier1_part1)
     ( while sleep 30; do
-        n=`ps ax 2>/dev/null | wc -l`
-        f=`sysctl -n vm.stats.vm.v_free_count 2>/dev/null`
-        j=`ps ax -o comm 2>/dev/null | grep -c '^java'`
+        n=`ps ax 2>/dev/null | wc -l` || :
+        f=`sysctl -n vm.stats.vm.v_free_count 2>/dev/null` || :
+        j=`ps ax -o comm 2>/dev/null | grep -c '^java'` || :
         echo "monitor: `date +%H:%M:%S` processes $n, java $j, free pages $f"
-        ps ax -o pid,ppid,rss,etime,command 2>/dev/null | sort -k3 -n -r | sed -n '2,3p' | cut -c1-140 | sed 's/^/monitor:   /'
+        ps ax -o pid,ppid,rss,etime,command 2>/dev/null | sort -k3 -n -r | sed -n '2,3p' | cut -c1-140 | sed 's/^/monitor:   /' || :
       done ) &
     monitor=$!
   ;; esac
