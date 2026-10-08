@@ -303,9 +303,22 @@ PROBE
     else
       tail -3 "$PWD/vmlayout.log" | sed 's/^/ccs probe: vmlayout did not build: /' | tee -a "$PWD/setup.txt"
     fi
-    # What else is mapped low: this shell's own map, as a stand-in.
-    procstat -v $$ 2>/dev/null | head -12 | sed 's/^/ccs probe: /' |
-      tee -a "$PWD/setup.txt" || :
+    # The map starts at 0x1000, so the ENOMEMs mean the ranges are taken:
+    # MAP_FIXED | MAP_EXCL fails that way over an existing mapping.  List
+    # what a JVM with the test's flags has below 4G, while it runs.
+    mkdir -p "$PWD/ccsprobe"
+    printf 'public class Nap { public static void main(String[] a) throws Exception { Thread.sleep(600000); } }\n' \
+      > "$PWD/ccsprobe/Nap.java"
+    "$JDK/bin/javac" -d "$PWD/ccsprobe" "$PWD/ccsprobe/Nap.java" 2>&1 | tail -3 || :
+    "$JDK/bin/java" -XX:+UnlockDiagnosticVMOptions -XX:SharedBaseAddress=8g -Xmx128m \
+        -Xshare:off -cp "$PWD/ccsprobe" Nap &
+    nap=$!
+    sleep 20
+    procstat -v $nap 2>/dev/null |
+      awk 'NR == 1 || length($2) <= 10 || $2 < "0x0000000100000000"' | head -40 |
+      sed 's/^/ccs probe: /' | tee -a "$PWD/setup.txt" || :
+    kill $nap 2>/dev/null || :
+    wait $nap 2>/dev/null || :
   ;; esac
 fi
 
