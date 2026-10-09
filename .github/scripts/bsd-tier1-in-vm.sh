@@ -238,7 +238,13 @@ public class DestroyProbe {
         for (int i = 0; i < 5; i++) {
             Process p = new ProcessBuilder("sleep", "60").start();
             ProcessHandle h = p.toHandle();
-            String before = String.valueOf(h.info().startInstant());
+            java.lang.reflect.Field f = h.getClass().getDeclaredField("startTime");
+            f.setAccessible(true);
+            long recorded = f.getLong(h);
+            String before = recorded + " " + h.info().startInstant()
+                    + " now " + ProcessHandle.of(p.pid()).map(x -> {
+                        try { return String.valueOf(f.getLong(x)); }
+                        catch (Exception e) { return e.toString(); } }).orElse("(gone)");
             long t0 = System.nanoTime();
             p.destroy();
             boolean gone = p.waitFor(15, TimeUnit.SECONDS);
@@ -258,7 +264,8 @@ public class DestroyProbe {
     }
 }
 PROBE
-  "$JDK/bin/java" "$PWD/destroyprobe/DestroyProbe.java" 2>&1 | tail -12 | tee -a "$PWD/setup.txt" || :
+  "$JDK/bin/java" --add-opens java.base/java.lang=ALL-UNNAMED \
+      "$PWD/destroyprobe/DestroyProbe.java" 2>&1 | tail -12 | tee -a "$PWD/setup.txt" || :
 fi
 
 # runtime/CompressedOops/CompressedClassPointers fails on FreeBSD/aarch64
