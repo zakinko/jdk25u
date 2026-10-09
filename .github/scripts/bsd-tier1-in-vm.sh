@@ -279,6 +279,17 @@ if [ "$os" = OpenBSD ] && [ "`uname -m`" = amd64 ]; then
     mkdir -p "$PWD/loopprobe"
     "$JDK/bin/javac" -d "$PWD/loopprobe" \
         test/hotspot/jtreg/compiler/loopopts/TestMaxLoopOptsCountReached.java 2>&1 | tail -3 || :
+    # The compile spends three quarters of its time in the kernel
+    # ("real 31.46 user 6.75 sys 24.15", the same with junking off), so
+    # count the system calls it makes, by name.
+    ktrace -i -t c -f "$PWD/loopprobe/ktrace.out" "$JDK/bin/java" -Xcomp -XX:-PartialPeelLoop \
+        -XX:CompileCommand=quiet -XX:CompileCommand=compileonly,TestMaxLoopOptsCountReached::test \
+        -cp "$PWD/loopprobe" TestMaxLoopOptsCountReached > /dev/null 2>&1 || :
+    kdump -f "$PWD/loopprobe/ktrace.out" 2>/dev/null |
+      awk '$3 == "CALL" { n = $4; sub(/\(.*/, "", n); c[n]++ } END { for (k in c) print c[k], k }' |
+      sort -n -r | head -12 | tr '\n' ',' | sed 's/^/loop probe: system calls: /; s/,$/\n/' |
+      tee -a "$PWD/setup.txt" || :
+    rm -f "$PWD/loopprobe/ktrace.out"
     for m in "" jj; do
       ( MALLOC_OPTIONS=$m; export MALLOC_OPTIONS
         /usr/bin/time -p "$JDK/bin/java" -Xcomp -XX:-PartialPeelLoop -XX:+CITime \
