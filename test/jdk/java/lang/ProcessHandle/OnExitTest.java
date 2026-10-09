@@ -43,6 +43,11 @@ import org.testng.TestNG;
  * @test
  * @bug 8333742
  * @requires vm.flagless
+ * @comment The DragonFly guest stops answering moments after this test
+ *          starts, with processes and free memory at their usual levels,
+ *          so the test takes the kernel down rather than running out of
+ *          anything.
+ * @requires os.family != "dragonfly"
  * @library /test/lib
  * @modules jdk.management
  * @build jdk.test.lib.Utils
