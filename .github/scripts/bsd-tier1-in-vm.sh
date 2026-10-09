@@ -268,6 +268,36 @@ PROBE
       "$PWD/destroyprobe/DestroyProbe.java" 2>&1 | tail -12 | tee -a "$PWD/setup.txt" || :
 fi
 
+# compiler/loopopts/TestMaxLoopOptsCountReached times out on OpenBSD
+# alone, on amd64 under KVM as on aarch64, with C2 still on its one
+# compile -- and on amd64 the compiler thread had used only 120 of the
+# 480 seconds.  Time the test's own compile here, as the test runs it,
+# with malloc as it comes and with junking turned off, and say how the
+# time splits between user and system.
+if [ "$os" = OpenBSD ] && [ "`uname -m`" = amd64 ]; then
+  case "$suite" in *tier1_compiler_3)
+    mkdir -p "$PWD/loopprobe"
+    "$JDK/bin/javac" -d "$PWD/loopprobe" \
+        test/hotspot/jtreg/compiler/loopopts/TestMaxLoopOptsCountReached.java 2>&1 | tail -3 || :
+    for m in "" jj; do
+      ( MALLOC_OPTIONS=$m; export MALLOC_OPTIONS
+        /usr/bin/time -p "$JDK/bin/java" -Xcomp -XX:-PartialPeelLoop -XX:+CITime \
+            -XX:CompileCommand=quiet \
+            -XX:CompileCommand=compileonly,TestMaxLoopOptsCountReached::test \
+            -cp "$PWD/loopprobe" TestMaxLoopOptsCountReached ) > "$PWD/loopprobe/out$m.txt" 2>&1 &
+      pid=$!
+      ( sleep 300; kill -9 $pid 2>/dev/null ) &
+      killer=$!
+      wait $pid 2>/dev/null || :
+      kill $killer 2>/dev/null || :
+      echo "loop probe (MALLOC_OPTIONS=${m:-default}): `grep -E '^(real|user|sys) ' "$PWD/loopprobe/out$m.txt" | tr '\n' ' '`" |
+        tee -a "$PWD/setup.txt"
+      grep -m1 -E '^ +C2 [{]' "$PWD/loopprobe/out$m.txt" | sed 's/; nmethods.*//; s/^/loop probe:   /' |
+        tee -a "$PWD/setup.txt" || :
+    done
+  ;; esac
+fi
+
 # runtime/CompressedOops/CompressedClassPointers fails on FreeBSD/aarch64
 # alone: with a 128M heap the class space should land below 4G, for a
 # zero narrow klass base, and lands at 0x00000ff000000000 instead.  Log
