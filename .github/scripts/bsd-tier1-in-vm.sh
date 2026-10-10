@@ -235,7 +235,7 @@ public class DestroyProbe {
     public static void main(String[] args) throws Exception {
         System.out.println("destroy probe: launchMechanism "
                 + System.getProperty("jdk.lang.Process.launchMechanism", "(default)"));
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 20; i++) {
             Process p = new ProcessBuilder("sleep", "60").start();
             ProcessHandle h = p.toHandle();
             java.lang.reflect.Field f = h.getClass().getDeclaredField("startTime");
@@ -265,7 +265,7 @@ public class DestroyProbe {
 }
 PROBE
   "$JDK/bin/java" --add-opens java.base/java.lang=ALL-UNNAMED \
-      "$PWD/destroyprobe/DestroyProbe.java" 2>&1 | tail -12 | tee -a "$PWD/setup.txt" || :
+      "$PWD/destroyprobe/DestroyProbe.java" 2>&1 | tail -45 | tee -a "$PWD/setup.txt" || :
 fi
 
 # compiler/loopopts/TestMaxLoopOptsCountReached times out on OpenBSD
