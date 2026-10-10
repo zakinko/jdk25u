@@ -31,6 +31,11 @@
  *          on MacOS because the heap is given an arbitrary address that occasionally
  *          collides with where we would ideally have placed the compressed class space.
  * @requires os.family != "mac"
+ * @comment FreeBSD on aarch64 maps the shared libraries just above 2G and keeps
+ *          a 1G guard below them, so no 1G range below 4G is left for the
+ *          compressed class space and the zero-based encoding the test
+ *          expects cannot be had.
+ * @requires !(os.family == "freebsd" & os.arch == "aarch64")
  * @library /test/lib
  * @modules java.base/jdk.internal.misc
  *          java.management
