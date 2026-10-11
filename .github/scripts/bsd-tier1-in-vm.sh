@@ -287,23 +287,31 @@ if [ "$os" = OpenBSD ] && [ "`uname -m`" = amd64 ]; then
         -cp "$PWD/loopprobe" TestMaxLoopOptsCountReached > /dev/null 2>&1 || :
     kdump -f "$PWD/loopprobe/ktrace.out" 2>/dev/null |
       awk '$3 == "CALL" { n = $4; sub(/\(.*/, "", n); c[n]++ } END { for (k in c) print c[k], k }' |
-      sort -n -r | head -12 | tr '\n' ',' | sed 's/^/loop probe: system calls: /; s/,$/\n/' |
+      sort -n -r | head -12 | tr '\n' ',' | sed 's/^/loop probe: system calls: /; s/,$//' |
       tee -a "$PWD/setup.txt" || :
+    echo | tee -a "$PWD/setup.txt"
     rm -f "$PWD/loopprobe/ktrace.out"
-    for m in "" jj; do
+    # 23543 mmap and 21698 munmap calls in one compile: OpenBSD's malloc
+    # maps every allocation larger than half a page on its own and keeps
+    # only a small cache of freed pages, and C2 frees and allocates large
+    # arena chunks all the time.  '>' doubles that cache; six of them make
+    # it 64 times as large.
+    n=0
+    for m in "" jj ">>>>>>"; do
+      n=`expr $n + 1`
       ( MALLOC_OPTIONS=$m; export MALLOC_OPTIONS
         /usr/bin/time -p "$JDK/bin/java" -Xcomp -XX:-PartialPeelLoop -XX:+CITime \
             -XX:CompileCommand=quiet \
             -XX:CompileCommand=compileonly,TestMaxLoopOptsCountReached::test \
-            -cp "$PWD/loopprobe" TestMaxLoopOptsCountReached ) > "$PWD/loopprobe/out$m.txt" 2>&1 &
+            -cp "$PWD/loopprobe" TestMaxLoopOptsCountReached ) > "$PWD/loopprobe/out$n.txt" 2>&1 &
       pid=$!
       ( sleep 300; kill -9 $pid 2>/dev/null ) &
       killer=$!
       wait $pid 2>/dev/null || :
       kill $killer 2>/dev/null || :
-      echo "loop probe (MALLOC_OPTIONS=${m:-default}): `grep -E '^(real|user|sys) ' "$PWD/loopprobe/out$m.txt" | tr '\n' ' '`" |
+      echo "loop probe (MALLOC_OPTIONS=${m:-default}): `grep -E '^(real|user|sys) ' "$PWD/loopprobe/out$n.txt" | tr '\n' ' '`" |
         tee -a "$PWD/setup.txt"
-      grep -m1 -E '^ +C2 [{]' "$PWD/loopprobe/out$m.txt" | sed 's/; nmethods.*//; s/^/loop probe:   /' |
+      grep -m1 -E '^ +C2 [{]' "$PWD/loopprobe/out$n.txt" | sed 's/; nmethods.*//; s/^/loop probe:   /' |
         tee -a "$PWD/setup.txt" || :
     done
   ;; esac
