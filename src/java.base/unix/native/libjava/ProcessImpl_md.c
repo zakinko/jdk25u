@@ -47,8 +47,35 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <spawn.h>
+#ifdef __NetBSD__
+#include <sys/sysctl.h>
+#endif
 
 #include "childproc.h"
+
+#ifdef __NetBSD__
+/*
+ * NetBSD's posix_spawn returns, and the spawn helper runs and reports in,
+ * while the kernel still counts the child as being set up: kinfo_proc2
+ * gives it no start time (p_uvalid is 0), and a signal sent to it then is
+ * lost.  Process.destroy() right after start would leave the child
+ * running.  Wait, a little, until the child counts as started.
+ */
+static void
+waitUntilStarted(pid_t pid)
+{
+    int i;
+    for (i = 0; i < 1000; i++) {
+        struct kinfo_proc2 kp;
+        size_t len = sizeof(kp);
+        int mib[6] = {CTL_KERN, KERN_PROC2, KERN_PROC_PID, pid, sizeof(kp), 1};
+        if (sysctl(mib, 6, &kp, &len, NULL, 0) == -1 || len == 0 || kp.p_uvalid) {
+            return;
+        }
+        usleep(1000);
+    }
+}
+#endif
 
 /*
  *
@@ -847,6 +874,12 @@ Java_java_lang_ProcessImpl_forkAndExec(JNIEnv *env,
             goto Catch;
         }
     }
+
+#ifdef __NetBSD__
+    if (c->mode == MODE_POSIX_SPAWN) {
+        waitUntilStarted(resultPid);
+    }
+#endif
 
     switch (readFully(fail[0], &errnum, sizeof(errnum))) {
     case 0: break; /* Exec succeeded */
