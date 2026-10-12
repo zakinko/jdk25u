@@ -274,9 +274,8 @@ fi
 # compiler/loopopts/TestMaxLoopOptsCountReached times out on OpenBSD
 # alone, on amd64 under KVM as on aarch64, with C2 still on its one
 # compile -- and on amd64 the compiler thread had used only 120 of the
-# 480 seconds.  Time the test's own compile here, as the test runs it,
-# with malloc as it comes and with junking turned off, and say how the
-# time splits between user and system.
+# 480 seconds.  Look at the test's own compile here, as the test runs
+# it: which system calls it makes, what it maps, and how it faults.
 if [ "$os" = OpenBSD ] && [ "`uname -m`" = amd64 ]; then
   case "$suite" in *tier1_compiler_3)
     mkdir -p "$PWD/loopprobe"
@@ -293,30 +292,32 @@ if [ "$os" = OpenBSD ] && [ "`uname -m`" = amd64 ]; then
       sort -n -r | head -12 | tr '\n' ',' | sed 's/^/loop probe: system calls: /; s/,$//' |
       tee -a "$PWD/setup.txt" || :
     echo | tee -a "$PWD/setup.txt"
+    # MALLOC_OPTIONS changed nothing: "", jj and ">>>>>>" (a cache 64
+    # times as large) all gave real 41.6-42.0, sys 28.2-28.3.  So say
+    # what is mapped and unmapped -- how large, and by which thread -- to
+    # know whose allocations they are and whether a cache could hold them.
+    kdump -H -f "$PWD/loopprobe/ktrace.out" 2>/dev/null |
+      awk 'function hex(h,  i, v, d) { v = 0; h = tolower(h); sub(/^0x/, "", h); sub(/[^0-9a-f].*/, "", h)
+             for (i = 1; i <= length(h); i++) { d = index("0123456789abcdef", substr(h, i, 1)) - 1; v = v * 16 + d }
+             return v }
+           $3 == "CALL" && ($4 ~ /^mmap\(/ || $4 ~ /^munmap\(/) {
+             call = $4; name = call; sub(/\(.*/, "", name)
+             a = call; sub(/^[a-z]*\(/, "", a); split(a, f, ",")
+             kb = int(hex(f[2]) / 1024); b = 4; while (b < kb) b *= 2
+             s[name " <=" b "K"]++; t[name " tid " $1]++ }
+           END { for (k in s) print s[k], k; for (k in t) print t[k], k }' |
+      sort -n -r | head -16 | tr '\n' ',' | sed 's/^/loop probe: sizes and threads: /; s/,$//' |
+      tee -a "$PWD/setup.txt" || :
+    echo | tee -a "$PWD/setup.txt"
+    kdump -H -f "$PWD/loopprobe/ktrace.out" 2>/dev/null | grep -m4 'CALL  mmap(' |
+      sed 's/^/loop probe: /' | tee -a "$PWD/setup.txt" || :
     rm -f "$PWD/loopprobe/ktrace.out"
-    # 23543 mmap and 21698 munmap calls in one compile: OpenBSD's malloc
-    # maps every allocation larger than half a page on its own and keeps
-    # only a small cache of freed pages, and C2 frees and allocates large
-    # arena chunks all the time.  '>' doubles that cache; six of them make
-    # it 64 times as large.
-    n=0
-    for m in "" jj ">>>>>>"; do
-      n=`expr $n + 1`
-      ( MALLOC_OPTIONS=$m; export MALLOC_OPTIONS
-        /usr/bin/time -p "$JDK/bin/java" -Xcomp -XX:-PartialPeelLoop -XX:+CITime \
-            -XX:CompileCommand=quiet \
-            -XX:CompileCommand=compileonly,TestMaxLoopOptsCountReached::test \
-            -cp "$PWD/loopprobe" TestMaxLoopOptsCountReached ) > "$PWD/loopprobe/out$n.txt" 2>&1 &
-      pid=$!
-      ( sleep 300; kill -9 $pid 2>/dev/null ) &
-      killer=$!
-      wait $pid 2>/dev/null || :
-      kill $killer 2>/dev/null || :
-      echo "loop probe (MALLOC_OPTIONS=${m:-default}): `grep -E '^(real|user|sys) ' "$PWD/loopprobe/out$n.txt" | tr '\n' ' '`" |
-        tee -a "$PWD/setup.txt"
-      grep -m1 -E '^ +C2 [{]' "$PWD/loopprobe/out$n.txt" | sed 's/; nmethods.*//; s/^/loop probe:   /' |
-        tee -a "$PWD/setup.txt" || :
-    done
+    # How much of the system time is page faults on the fresh mappings.
+    /usr/bin/time -l "$JDK/bin/java" -Xcomp -XX:-PartialPeelLoop \
+        -XX:CompileCommand=quiet -XX:CompileCommand=compileonly,TestMaxLoopOptsCountReached::test \
+        -cp "$PWD/loopprobe" TestMaxLoopOptsCountReached > "$PWD/loopprobe/out.txt" 2>&1 || :
+    grep -E 'real|page|context' "$PWD/loopprobe/out.txt" | sed 's/^ */loop probe: /' |
+      tee -a "$PWD/setup.txt" || :
   ;; esac
 fi
 
