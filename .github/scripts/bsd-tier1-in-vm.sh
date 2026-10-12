@@ -457,6 +457,72 @@ PROBE
   fi
 fi
 
+# DragonFly's mmap(MAP_FIXED) removes the old range and inserts the new one
+# under the map's LWKT token alone, which a thread gives up when it blocks.
+# If another thread's mmap can land in the hole between the two, a commit
+# inside a reservation fails with memory to spare, as metaspace did in
+# java/foreign/TestUpcallStress ("Failed to commit metaspace").  Replace
+# pages of a reservation the way HotSpot commits them while other threads
+# map and unmap, and count the replaces that failed and the other threads'
+# mappings that came back inside the reservation.
+if [ "$os" = DragonFly ] && command -v cc >/dev/null 2>&1; then
+  cat > "$PWD/fixedprobe.c" <<'PROBE'
+#include <errno.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <time.h>
+#include <unistd.h>
+#define RES (64L << 20)
+static char *res;
+static volatile int stop;
+static volatile long inside;
+static void *churn(void *arg) {
+  unsigned seed = (unsigned)(long)arg;
+  while (!stop) {
+    size_t n = (size_t)(1 + rand_r(&seed) % 64) << 12;
+    char *p = mmap(NULL, n, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON, -1, 0);
+    if (p == MAP_FAILED) continue;
+    p[0] = 1;
+    if (p < res + RES && p + n > res) inside++;
+    munmap(p, n);
+  }
+  return NULL;
+}
+int main(void) {
+  res = mmap(NULL, RES, PROT_NONE, MAP_PRIVATE|MAP_NORESERVE|MAP_ANON, -1, 0);
+  if (res == MAP_FAILED) { perror("reserve"); return 1; }
+  pthread_t t[4];
+  for (long i = 0; i < 4; i++) pthread_create(&t[i], NULL, churn, (void *)(i + 1));
+  long ops = 0, failed = 0; int err = 0;
+  unsigned seed = 7;
+  time_t end = time(NULL) + 5;
+  while (time(NULL) < end) {
+    size_t off = (size_t)(rand_r(&seed) % 4096) << 12;
+    size_t n = (size_t)(1 + rand_r(&seed) % 2048) << 12;
+    if (off + n > RES) n = RES - off;
+    int prot = ops & 1 ? PROT_NONE : PROT_READ|PROT_WRITE;
+    if (mmap(res + off, n, prot, MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE|MAP_ANON, -1, 0) == MAP_FAILED) {
+      failed++; err = errno;
+    }
+    ops++;
+  }
+  stop = 1;
+  for (int i = 0; i < 4; i++) pthread_join(t[i], NULL);
+  printf("MAP_FIXED race probe: %ld replaces, %ld failed (last errno %d %s), %ld other mappings inside the reservation\n",
+         ops, failed, err, err ? strerror(err) : "", inside);
+  return 0;
+}
+PROBE
+  if cc -o "$PWD/fixedprobe" "$PWD/fixedprobe.c" -lpthread >"$PWD/fixedprobe.log" 2>&1; then
+    "$PWD/fixedprobe" 2>&1 | tee -a "$PWD/setup.txt" || :
+  else
+    tail -5 "$PWD/fixedprobe.log"
+  fi
+fi
+
 # java/lang/ProcessHandle/InfoTest fails on NetBSD/amd64 with "timeout
 # waiting for process to terminate" after Process.destroy(), and prints the
 # child's start time as a day or so after 1970.  ProcessHandle signals a
