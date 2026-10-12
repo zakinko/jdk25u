@@ -1825,6 +1825,21 @@ bool os::pd_commit_memory(char* addr, size_t size, bool exec) {
     }
   }
 #else
+#ifdef __DragonFly__
+  // DragonFly's mmap(MAP_FIXED) removes the old range and inserts the new
+  // one holding only the map's LWKT token, which is let go whenever the
+  // thread blocks, so another thread's mmap can take part of the hole in
+  // between.  The commit then fails with memory to spare ("Failed to commit
+  // metaspace"), and the other thread's mapping sits inside the
+  // reservation, where a later commit replaces it and its owner's munmap
+  // later takes committed pages away.  Every range reserved here is mapped
+  // already, so give it the access instead; the pages are zero-filled, as
+  // pd_uncommit_memory leaves them.  A range with something unmapped in it,
+  // which mprotect refuses as a whole, is mapped over as before.
+  if (::mprotect(addr, size, prot) == 0) {
+    return true;
+  }
+#endif
   uintptr_t res = (uintptr_t) ::mmap(addr, size, prot,
                                      MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS, -1, 0);
   if (res != (uintptr_t) MAP_FAILED) {
@@ -1950,8 +1965,10 @@ bool os::pd_uncommit_memory(char* addr, size_t size, bool exec) {
   // map locks, where another thread's mmap can take the hole.  Either way
   // it fails, and os::uncommit_memory stops the VM with "Failed to
   // uncommit" (GetLockOwnerName, in tier1).  When it does, take the access
-  // away and let the pages go when the kernel wants them;
-  // pd_commit_memory maps fresh zero-filled pages over the range again.
+  // away and let the pages go when the kernel wants them.  pd_commit_memory
+  // gives the access back with mprotect, and committed memory is expected to
+  // read as zero, so clear the pages first: whether the kernel has taken
+  // them or not, they then come back zero-filled.
   uintptr_t res = (uintptr_t) ::mmap(addr, size, PROT_NONE,
                                      MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE|MAP_ANONYMOUS, -1, 0);
   if (res != (uintptr_t) MAP_FAILED) {
@@ -1968,7 +1985,12 @@ bool os::pd_uncommit_memory(char* addr, size_t size, bool exec) {
       return false;
     }
   }
-  if (::mprotect(addr, size, PROT_NONE) != 0 ||
+  bool cleared = ::mprotect(addr, size, PROT_READ|PROT_WRITE) == 0;
+  if (cleared) {
+    ::memset(addr, 0, size);
+  }
+  if (!cleared ||
+      ::mprotect(addr, size, PROT_NONE) != 0 ||
       ::madvise(addr, size, MADV_FREE) != 0) {
     ErrnoPreserver ep;
     log_trace(os, map)("mprotect/madvise failed: " RANGEFMT " errno=(%s)",
