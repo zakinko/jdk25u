@@ -226,6 +226,80 @@ echo "--- end ---"
   grep -E ' (UseSVE|MaxVectorSize|UseSIMDForMemoryOps|UseAVX) ' |
   tee -a "$PWD/setup.txt" || :
 
+# The destroy probe below loses the SIGTERM exactly when the child's start
+# time still reads as 0 -- p_uvalid clear, which NetBSD reports while
+# execve holds p_reflock -- and only then.  Do what the JDK does without
+# the JDK: posix_spawn a helper that tells the parent it is alive and then
+# execs sleep, kill it with SIGTERM as soon as it says so, and count the
+# children that were still in exec at the kill and the ones that lived.
+if [ "$os" = NetBSD ] && command -v cc >/dev/null 2>&1; then
+  cat > "$PWD/execkill.c" <<'PROBE'
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#include <sys/wait.h>
+#include <errno.h>
+#include <signal.h>
+#include <spawn.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+extern char **environ;
+static int uvalid(pid_t pid) {
+  struct kinfo_proc2 kp;
+  size_t len = sizeof(kp);
+  int mib[6] = {CTL_KERN, KERN_PROC2, KERN_PROC_PID, pid, sizeof(kp), 1};
+  if (sysctl(mib, 6, &kp, &len, NULL, 0) == -1 || len == 0) return -1;
+  return kp.p_uvalid;
+}
+int main(int argc, char **argv) {
+  if (argc > 1) {                     /* the helper, as jspawnhelper */
+    char c = 1;
+    write(3, &c, 1);
+    close(3);
+    execl("/bin/sleep", "sleep", "60", (char *)NULL);
+    _exit(127);
+  }
+  int inexec = 0, inexec_lived = 0, lived = 0, n = 200;
+  for (int i = 0; i < n; i++) {
+    int fd[2];
+    pipe(fd);
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, fd[1], 3);
+    char *args[] = {argv[0], "child", NULL};
+    pid_t pid;
+    if (posix_spawn(&pid, argv[0], &fa, NULL, args, environ) != 0) { perror("spawn"); return 1; }
+    posix_spawn_file_actions_destroy(&fa);
+    close(fd[1]);
+    char c;
+    read(fd[0], &c, 1);
+    close(fd[0]);
+    int u = uvalid(pid);
+    kill(pid, SIGTERM);
+    int st = 0, done = 0;
+    for (int t = 0; t < 300 && !done; t++) {
+      if (waitpid(pid, &st, WNOHANG) == pid) done = 1; else usleep(10000);
+    }
+    if (u == 0) inexec++;
+    if (!done) {
+      lived++;
+      if (u == 0) inexec_lived++;
+      kill(pid, SIGKILL);
+      waitpid(pid, &st, 0);
+    }
+  }
+  printf("exec kill probe: %d children, %d still in exec at the SIGTERM, %d lived 3s past it (%d of them in exec)\n",
+         n, inexec, lived, inexec_lived);
+  return 0;
+}
+PROBE
+  if cc -o "$PWD/execkill" "$PWD/execkill.c" >"$PWD/execkill.log" 2>&1; then
+    "$PWD/execkill" 2>&1 | tee -a "$PWD/setup.txt" || :
+  else
+    tail -5 "$PWD/execkill.log"
+  fi
+fi
+
 # InfoTest's test3 on NetBSD: Process.destroy() leaves "sleep" running,
 # though a sleep the probe above spawns dies of SIGTERM.  Do what the test
 # does, through the JDK, a few times: start sleep, destroy it, wait, and
