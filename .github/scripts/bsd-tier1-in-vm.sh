@@ -58,7 +58,10 @@ if [ -f bundles.sha256 ] && command -v sha256sum >/dev/null 2>&1; then
   try=0
   while :; do
     rc=0
-    sums=`cd bundles && sha256sum -c ../bundles.sha256 2>&1` || rc=$?
+    # stdout alone: sha256sum's warning on stderr can land in the middle
+    # of a FAILED line ("libjvm.so: FAIsha256sum: WARNING ... LED") and
+    # hide the file's name from the sed below.
+    sums=`cd bundles && sha256sum -c ../bundles.sha256 2>/dev/null` || rc=$?
     [ $rc -ne 0 ] || break
     bad=`echo "$sums" | sed -n 's/: FAILED.*$//p'`
     echo "$sums" | grep -v ': OK$' | head -20 | tee -a "$PWD/setup.txt"
