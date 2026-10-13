@@ -231,7 +231,8 @@ echo "--- end ---"
 # execve holds p_reflock -- and only then.  Do what the JDK does without
 # the JDK: posix_spawn a helper that tells the parent it is alive and then
 # execs sleep, kill it with SIGTERM as soon as it says so, and count the
-# children that were still in exec at the kill and the ones that lived.
+# children that were still in exec at the kill and the ones that lived;
+# then again the way destroy0 now does it, which should leave none.
 if [ "$os" = NetBSD ] && command -v cc >/dev/null 2>&1; then
   cat > "$PWD/execkill.c" <<'PROBE'
 #include <sys/param.h>
@@ -249,7 +250,14 @@ static int uvalid(pid_t pid) {
   size_t len = sizeof(kp);
   int mib[6] = {CTL_KERN, KERN_PROC2, KERN_PROC_PID, pid, sizeof(kp), 1};
   if (sysctl(mib, 6, &kp, &len, NULL, 0) == -1 || len == 0) return -1;
+  if (kp.p_realstat == SZOMB || kp.p_realstat == SDEAD) return -1;
   return kp.p_uvalid;
+}
+/* What ProcessHandleImpl_unix.c's destroy0 does on NetBSD. */
+static int wait_out_of_exec(pid_t pid) {
+  int in = 0;
+  for (int i = 0; i < 1000 && uvalid(pid) == 0; i++) { in = 1; usleep(1000); }
+  return in;
 }
 int main(int argc, char **argv) {
   if (argc > 1) {                     /* the helper, as jspawnhelper */
@@ -260,6 +268,8 @@ int main(int argc, char **argv) {
     _exit(127);
   }
   int inexec = 0, inexec_lived = 0, lived = 0, n = 200;
+  for (int pass = 0; pass < 2; pass++) {
+  inexec = inexec_lived = lived = 0;
   for (int i = 0; i < n; i++) {
     int fd[2];
     pipe(fd);
@@ -275,7 +285,13 @@ int main(int argc, char **argv) {
     read(fd[0], &c, 1);
     close(fd[0]);
     int u = uvalid(pid);
-    kill(pid, SIGTERM);
+    if (pass == 0) {
+      kill(pid, SIGTERM);
+    } else {
+      wait_out_of_exec(pid);
+      kill(pid, SIGTERM);
+      if (wait_out_of_exec(pid)) kill(pid, SIGTERM);
+    }
     int st = 0, done = 0;
     for (int t = 0; t < 300 && !done; t++) {
       if (waitpid(pid, &st, WNOHANG) == pid) done = 1; else usleep(10000);
@@ -288,8 +304,9 @@ int main(int argc, char **argv) {
       waitpid(pid, &st, 0);
     }
   }
-  printf("exec kill probe: %d children, %d still in exec at the SIGTERM, %d lived 3s past it (%d of them in exec)\n",
-         n, inexec, lived, inexec_lived);
+  printf("exec kill probe (%s): %d children, %d in exec when they said they were alive, %d lived 3s past the SIGTERM (%d of them in exec)\n",
+         pass ? "as destroy0 does it" : "kill at once", n, inexec, lived, inexec_lived);
+  }
   return 0;
 }
 PROBE
