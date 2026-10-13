@@ -50,6 +50,11 @@
   #include <sys/procfs.h>
 #endif
 
+#ifdef __NetBSD__
+  #include <sys/param.h>
+  #include <sys/sysctl.h>
+#endif
+
 /**
  * This file contains the implementation of the native ProcessHandleImpl
  * functions which are common to all Unix variants.
@@ -267,6 +272,36 @@ Java_java_lang_ProcessHandleImpl_getCurrentPid0(JNIEnv *env, jclass clazz) {
     return (jlong) pid;
 }
 
+#ifdef __NetBSD__
+/*
+ * NetBSD drops a signal sent to a process that is in execve: of 200
+ * children killed with SIGTERM while they exec'd sleep, 185 were still
+ * running 3 seconds later.  A child is in exec from the moment it tells
+ * the parent it is alive until it runs the target, so Process.destroy()
+ * soon after start() can be lost.  The kernel reports such a process
+ * with p_uvalid clear: fill_kproc2() cannot take p_reflock, which execve
+ * holds as a writer, and a zombie is the only other process it says that
+ * of.  Returns whether pid was in exec, after waiting up to about a
+ * second for it to come out.
+ */
+static jboolean waitOutOfExec(pid_t pid) {
+    jboolean inExec = JNI_FALSE;
+    int i;
+    for (i = 0; i < 1000; i++) {
+        struct kinfo_proc2 kp;
+        size_t len = sizeof(kp);
+        int mib[6] = {CTL_KERN, KERN_PROC2, KERN_PROC_PID, pid, sizeof(kp), 1};
+        if (sysctl(mib, 6, &kp, &len, NULL, 0) == -1 || len == 0 || kp.p_uvalid ||
+            kp.p_realstat == SZOMB || kp.p_realstat == SDEAD) {
+            break;
+        }
+        inExec = JNI_TRUE;
+        usleep(1000);
+    }
+    return inExec;
+}
+#endif
+
 /*
  * Class:     java_lang_ProcessHandleImpl
  * Method:    destroy0
@@ -283,7 +318,19 @@ Java_java_lang_ProcessHandleImpl_destroy0(JNIEnv *env,
     jlong start = Java_java_lang_ProcessHandleImpl_isAlive0(env, obj, jpid);
 
     if (start == startTime || start == 0 || startTime == 0) {
+#ifdef __NetBSD__
+        jboolean sent;
+        waitOutOfExec(pid);
+        sent = (kill(pid, sig) < 0) ? JNI_FALSE : JNI_TRUE;
+        // The exec may have begun just as the signal went; send it again
+        // once the process is out of it.
+        if (sent && waitOutOfExec(pid)) {
+            kill(pid, sig);
+        }
+        return sent;
+#else
         return (kill(pid, sig) < 0) ? JNI_FALSE : JNI_TRUE;
+#endif
     } else {
         return JNI_FALSE;
     }
