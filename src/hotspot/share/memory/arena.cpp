@@ -125,6 +125,69 @@ class ChunkPool {
     return nullptr;
   }
 
+#ifdef __OpenBSD__
+  // OpenBSD's malloc gives every allocation of more than a few pages a
+  // mapping of its own and unmaps it when it is freed; its cache of freed
+  // pages does not take blocks that large.  C2 sizes many arrays by node
+  // count and allocates them afresh in each round of loop optimization, so
+  // a large method maps, faults in and unmaps megabytes at a time, tens of
+  // thousands of times: 23543 mmap and 19340 munmap calls and 14.5 million
+  // page faults for one compile, two thirds of its time in the kernel.
+  // Keep a few such chunks for reuse, as glibc keeps freed memory, until
+  // the cleaner below runs.
+  static constexpr int    _num_large = 8;
+  static constexpr size_t _large_min = 256 * K;
+  static constexpr size_t _large_max_total = 64 * M;
+  static Chunk*  _large[_num_large];
+  static size_t  _large_total;
+
+  // A cached chunk at least length long and not much longer, or null.
+  static Chunk* take_large(size_t length) {
+    if (length < _large_min) {
+      return nullptr;
+    }
+    ChunkPoolLocker lock;
+    for (int i = 0; i < _num_large; i++) {
+      Chunk* c = _large[i];
+      if (c != nullptr && c->length() >= length && c->length() - length <= length / 8) {
+        _large[i] = nullptr;
+        _large_total -= c->length();
+        return c;
+      }
+    }
+    return nullptr;
+  }
+
+  static bool keep_large(Chunk* c) {
+    if (c->length() < _large_min) {
+      return false;
+    }
+    ChunkPoolLocker lock;
+    if (_large_total + c->length() > _large_max_total) {
+      return false;
+    }
+    for (int i = 0; i < _num_large; i++) {
+      if (_large[i] == nullptr) {
+        _large[i] = c;
+        _large_total += c->length();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static void prune_large() {
+    ChunkPoolLocker lock;
+    for (int i = 0; i < _num_large; i++) {
+      if (_large[i] != nullptr) {
+        os::free(_large[i]);
+        _large[i] = nullptr;
+      }
+    }
+    _large_total = 0;
+  }
+#endif
+
 public:
   ChunkPool(size_t size) : _first(nullptr), _size(size) {}
 
@@ -133,6 +196,9 @@ public:
     for (int i = 0; i < _num_pools; i++) {
       _pools[i].prune();
     }
+#ifdef __OpenBSD__
+    prune_large();
+#endif
   }
 
   // Returns an initialized and null-terminated Chunk of requested size
@@ -178,6 +244,15 @@ Chunk* ChunkPool::allocate_chunk(Arena* arena, size_t length, AllocFailType allo
       chunk = c;
     }
   }
+#ifdef __OpenBSD__
+  else {
+    chunk = take_large(length);
+    if (chunk != nullptr) {
+      // Keep the whole of it: its length is what it was allocated with.
+      length = chunk->length();
+    }
+  }
+#endif
   if (chunk == nullptr) {
     // Either the pool was empty, or this is a non-standard length. Allocate a new Chunk from C-heap.
     size_t bytes = ARENA_ALIGN(sizeof(Chunk)) + length;
@@ -216,6 +291,11 @@ void ChunkPool::deallocate_chunk(Chunk* c) {
   if (pool != nullptr) {
     pool->return_to_pool(c);
   } else {
+#ifdef __OpenBSD__
+    if (keep_large(c)) {
+      return;
+    }
+#endif
     // Free chunks under a lock so that NMT adjustment is stable.
     ChunkPoolLocker lock;
     os::free(c);
@@ -223,6 +303,10 @@ void ChunkPool::deallocate_chunk(Chunk* c) {
 }
 
 ChunkPool ChunkPool::_pools[] = { Chunk::size, Chunk::medium_size, Chunk::init_size, Chunk::tiny_size };
+#ifdef __OpenBSD__
+Chunk* ChunkPool::_large[ChunkPool::_num_large];
+size_t ChunkPool::_large_total = 0;
+#endif
 
 class ChunkPoolCleaner : public PeriodicTask {
   static const int cleaning_interval = 5000; // cleaning interval in ms
@@ -276,7 +360,7 @@ Arena::Arena(MemTag mem_tag, Tag tag, size_t init_size) :
   _hwm = _chunk->bottom();      // Save the cached hwm, max
   _max = _chunk->top();
   MemTracker::record_new_arena(mem_tag);
-  set_size_in_bytes(init_size);
+  set_size_in_bytes(_chunk->length());
 }
 
 Arena::~Arena() {
@@ -341,7 +425,7 @@ void* Arena::grow(size_t x, AllocFailType alloc_failmode) {
   }
   _hwm  = _chunk->bottom();     // Save the cached hwm, max
   _max =  _chunk->top();
-  set_size_in_bytes(size_in_bytes() + len);
+  set_size_in_bytes(size_in_bytes() + _chunk->length());
   void* result = _hwm;
   _hwm += x;
   return result;
