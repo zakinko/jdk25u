@@ -615,6 +615,9 @@ if [ "$os" = DragonFly ] && command -v cc >/dev/null 2>&1; then
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
+#ifndef MAP_NORESERVE
+#define MAP_NORESERVE 0
+#endif
 #define RES (64L << 20)
 static char *res;
 static volatile int stop;
@@ -659,7 +662,7 @@ PROBE
   if cc -o "$PWD/fixedprobe" "$PWD/fixedprobe.c" -lpthread >"$PWD/fixedprobe.log" 2>&1; then
     "$PWD/fixedprobe" 2>&1 | tee -a "$PWD/setup.txt" || :
   else
-    tail -5 "$PWD/fixedprobe.log"
+    tail -5 "$PWD/fixedprobe.log" | sed 's/^/MAP_FIXED race probe: cc: /' | tee -a "$PWD/setup.txt"
   fi
 fi
 
