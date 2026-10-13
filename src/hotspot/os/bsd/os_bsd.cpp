@@ -1835,8 +1835,11 @@ bool os::pd_commit_memory(char* addr, size_t size, bool exec) {
   // later takes committed pages away.  Every range reserved here is mapped
   // already, so give it the access instead; the pages are zero-filled, as
   // pd_uncommit_memory leaves them.  A range with something unmapped in it,
-  // which mprotect refuses as a whole, is mapped over as before.
-  if (::mprotect(addr, size, prot) == 0) {
+  // which mprotect refuses as a whole, is mapped over as before.  So is one
+  // that does not start on a page: DragonFly's mprotect rounds the address
+  // down and changes whatever page that lands in, where mmap says EINVAL
+  // (TestMemoryAllocationLogging#testCommitFailed asks for that).
+  if (is_aligned(addr, os::vm_page_size()) && ::mprotect(addr, size, prot) == 0) {
     return true;
   }
 #endif
