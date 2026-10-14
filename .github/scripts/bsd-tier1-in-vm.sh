@@ -75,7 +75,11 @@ if [ -f bundles.sha256 ] && command -v sha256sum >/dev/null 2>&1; then
       exit 1
     fi
     for f in $bad; do
+      # "FAILED open or read" is a file that never arrived, perhaps with
+      # the directory it goes in.
+      mkdir -p "`dirname "bundles/$f"`"
       if fetch -q -o "bundles/$f.new" "$server/$f"; then
+        [ -f "bundles/$f" ] || echo "$f: did not arrive; fetched it" | tee -a "$PWD/setup.txt"
         n=`cmp -l "bundles/$f" "bundles/$f.new" 2>/dev/null | wc -l`
         echo "$f: `ls -l "bundles/$f" | awk '{print $5}'` bytes here, `ls -l "bundles/$f.new" | awk '{print $5}'` fetched, $n differ; the first (offset, damaged, good, octal):" |
           tee -a "$PWD/setup.txt"
