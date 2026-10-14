@@ -366,54 +366,6 @@ PROBE
       "$PWD/destroyprobe/DestroyProbe.java" 2>&1 | tail -45 | tee -a "$PWD/setup.txt" || :
 fi
 
-# java/foreign/TestStringEncodingJumbo times out on OpenBSD amd64: each of
-# its two cases maps a 2 GB file that FileChannel.map has just extended
-# with ftruncate and fills it, and one case took 577 s, the thread busy in
-# Unsafe.setMemory0 the whole time.  The file is sparse, so every page
-# touched needs a block, and FFS without soft dependencies writes the
-# metadata for each one synchronously.  Time filling a sparse 512 MB
-# mapped file on the file system build/ is on, as it is mounted and again
-# mounted async.
-if [ "$os" = OpenBSD ] && [ "`uname -m`" = amd64 ] && command -v cc >/dev/null 2>&1; then
-  case "$suite" in *tier1_part3)
-    cat > "$PWD/fillprobe.c" <<'PROBE'
-#include <fcntl.h>
-#include <stdio.h>
-#include <string.h>
-#include <sys/mman.h>
-#include <sys/time.h>
-#include <unistd.h>
-int main(int argc, char **argv) {
-  size_t n = 512L << 20;
-  int fd = open(argv[1], O_RDWR | O_CREAT | O_TRUNC, 0600);
-  if (fd < 0 || ftruncate(fd, n) != 0) { perror("setup"); return 1; }
-  char *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-  if (p == MAP_FAILED) { perror("mmap"); return 1; }
-  struct timeval a, b;
-  gettimeofday(&a, NULL);
-  memset(p, 1, n);
-  munmap(p, n);
-  gettimeofday(&b, NULL);
-  close(fd);
-  unlink(argv[1]);
-  printf("%.1f s for 512 MB\n", (b.tv_sec - a.tv_sec) + (b.tv_usec - a.tv_usec) / 1e6);
-  return 0;
-}
-PROBE
-    if cc -o "$PWD/fillprobe" "$PWD/fillprobe.c" >/dev/null 2>&1; then
-      mkdir -p build
-      fs=`df build | awk 'NR == 2 { print $6 }'`
-      mount | grep " on $fs " | sed 's/^/fill probe: /' | tee -a "$PWD/setup.txt" || :
-      echo "fill probe (as mounted): `"$PWD/fillprobe" build/fillprobe.dat 2>&1`" | tee -a "$PWD/setup.txt"
-      if mount -u -o async "$fs" 2>&1; then
-        echo "fill probe (async): `"$PWD/fillprobe" build/fillprobe.dat 2>&1`" | tee -a "$PWD/setup.txt"
-        mount -u -o noasync "$fs" 2>/dev/null || :
-        mount | grep " on $fs " | sed 's/^/fill probe: after: /' | tee -a "$PWD/setup.txt" || :
-      fi
-    fi
-  ;; esac
-fi
-
 # compiler/loopopts/TestMaxLoopOptsCountReached times out on OpenBSD
 # alone, on amd64 under KVM as on aarch64, with C2 still on its one
 # compile -- and on amd64 the compiler thread had used only 120 of the
