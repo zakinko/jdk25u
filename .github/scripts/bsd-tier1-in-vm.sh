@@ -422,7 +422,8 @@ fi
 # itself having used only seconds of CPU.  Run a dump as the test does, then
 # the same one relocated, each for at most 15 minutes; say how long each
 # took, the end of its log, and if one is still running, what state its
-# threads are in.
+# threads are in.  Without the test's aot+map trace both took 15 s, so
+# write that trace too, as the test does.
 if [ "`uname -m`" = arm64 ] || [ "`uname -m`" = aarch64 ]; then
   case "$os:$suite" in FreeBSD:*tier1_runtime|OpenBSD:*tier1_runtime)
     mkdir -p "$PWD/relocprobe"
@@ -432,6 +433,7 @@ if [ "`uname -m`" = arm64 ] || [ "`uname -m`" = aarch64 ]; then
       t0=`date +%s`
       "$JDK/bin/java" -Xshare:dump -XX:SharedArchiveFile="$PWD/relocprobe/$mode.jsa" -Xint \
           -Xlog:cds=debug,gc=debug,os+map=debug:file="$PWD/relocprobe/$mode.log" \
+          -Xlog:aot+map*=trace:file="$PWD/relocprobe/$mode.map":none:filesize=0 \
           -Xmx128M -Xms128M -Xmn120M -XX:-UseCompressedOops $extra > "$PWD/relocprobe/$mode.out" 2>&1 &
       pid=$!
       n=0
@@ -441,13 +443,14 @@ if [ "`uname -m`" = arm64 ] || [ "`uname -m`" = aarch64 ]; then
         [ "$os" = FreeBSD ] && procstat -kk $pid 2>/dev/null | head -30 | sed 's/^/reloc probe: /' | tee -a "$PWD/setup.txt" || :
         "$JDK/bin/jcmd" $pid Thread.print 2>/dev/null | grep -A8 '"VM Thread"\|"main"' | head -24 | sed 's/^/reloc probe: /' | tee -a "$PWD/setup.txt" || :
         kill -9 $pid 2>/dev/null || :
-        echo "reloc probe ($mode): still running after $n s; killed" | tee -a "$PWD/setup.txt"
+        echo "reloc probe ($mode): still running after $n s; killed; map file `ls -l "$PWD/relocprobe/$mode.map" 2>/dev/null | awk '{print $5}'` bytes" | tee -a "$PWD/setup.txt"
       else
         rc=0; wait $pid || rc=$?
-        echo "reloc probe ($mode): exit $rc after `expr \`date +%s\` - $t0` s" | tee -a "$PWD/setup.txt"
+        echo "reloc probe ($mode): exit $rc after `expr \`date +%s\` - $t0` s; map file `ls -l "$PWD/relocprobe/$mode.map" 2>/dev/null | awk '{print $5}'` bytes" | tee -a "$PWD/setup.txt"
       fi
       tail -12 "$PWD/relocprobe/$mode.log" 2>/dev/null | sed "s/^/reloc probe ($mode) log: /" | tee -a "$PWD/setup.txt" || :
       tail -3 "$PWD/relocprobe/$mode.out" 2>/dev/null | sed "s/^/reloc probe ($mode) out: /" | tee -a "$PWD/setup.txt" || :
+      tail -4 "$PWD/relocprobe/$mode.map" 2>/dev/null | cut -c1-160 | sed "s/^/reloc probe ($mode) map: /" | tee -a "$PWD/setup.txt" || :
     done
   ;; esac
 fi
