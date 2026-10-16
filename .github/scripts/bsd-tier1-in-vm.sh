@@ -809,6 +809,16 @@ if [ "$os" = DragonFly ]; then
   ;; esac
 fi
 
+# runtime/cds/DeterministicDump makes six CDS dumps, each writing an
+# aot+map trace of the whole archive.  Under emulation one such dump takes
+# over two minutes, where the dump itself takes twelve seconds, and the six
+# together fit in 120 s times the guest's factor of 12 only on a good day.
+# Give the runtime part twice that.
+case "`uname -m`:$suite" in
+  arm64:*tier1_runtime|aarch64:*tier1_runtime)
+    TIMEOUT_FACTOR=`expr ${TIMEOUT_FACTOR:-4} \* 2` ;;
+esac
+
 gmake test-prebuilt $gnu \
   TEST="$suite" \
   BOOT_JDK="$JDK" \
