@@ -450,6 +450,33 @@ void os_getCmdlineAndUserInfo(JNIEnv *env, jobject jinfo, pid_t pid) {
     // returns success having written nothing, so cmd kept whatever was on
     // the stack, and the argument lookup answers EINVAL, which this code
     // treats as "no arguments" and passes over in silence.
+#ifdef __DragonFly__
+    // DragonFly 6.4's kern.proc.pathname handler calls cache_fullpath() on
+    // the process without checking that it still has its file table, and
+    // cache_fullpath() reads p->p_fd->fd_nrdir.  exit1() frees the table
+    // part way through, so asking for the path of a child that is exiting
+    // -- InfoTest and OnExitTest kill theirs and look at them -- takes the
+    // kernel down: the guest stops answering mid-test.  Leave a process
+    // alone once it has started to exit (P_WEXIT is set first thing in
+    // exit1()) or has lost its file table.  That narrows the window to the
+    // time between the two sysctls; only a kernel fix closes it.
+    {
+#ifndef P_WEXIT
+#define P_WEXIT  0x02000   // <sys/proc.h>, kernel only
+#endif
+#ifndef P_SYSTEM
+#define P_SYSTEM 0x00200
+#endif
+        struct kinfo_proc kp;
+        size_t kpsize = sizeof(kp);
+        int kpmib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+        if (sysctl(kpmib, 4, &kp, &kpsize, NULL, 0) == -1 || kpsize == 0 ||
+            kp.kp_fd == 0 || kp.kp_stat == SZOMB ||
+            (kp.kp_flags & (P_WEXIT | P_SYSTEM)) != 0) {
+            return;
+        }
+    }
+#endif
     size = sizeof(cmd);
     mib[0] = CTL_KERN;
 #ifdef __NetBSD__
