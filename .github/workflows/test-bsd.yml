@@ -155,6 +155,9 @@ jobs:
       # runner ends it with the job.
       - name: 'Serve the JDK bundle to the guest'
         run: |
+          # The script the guest runs, too: it came over damaged or not at
+          # all once ("cannot open .github/scripts/bsd-tier1-in-vm.sh").
+          cp .github/scripts/bsd-tier1-in-vm.sh bundles/
           cd bundles
           nohup python3 -m http.server 8642 --bind 0.0.0.0 > ../http.log 2>&1 &
           sleep 2
@@ -240,7 +243,16 @@ jobs:
           prepare: |
             mount -t procfs proc /proc
             pkg install -y bash gmake zip unzip gsed gnugrep
-          run: sh .github/scripts/bsd-tier1-in-vm.sh "$TEST_SUITE"
+          # On aarch64 the workspace can arrive without the script; take the
+          # runner's copy, served with the bundle, wherever it is reachable.
+          run: |
+            s=.github/scripts/bsd-tier1-in-vm.sh
+            gw=`netstat -rn -f inet | awk '$1 == "default" { print $2; exit }'`
+            mkdir -p `dirname $s`
+            if [ -n "$gw" ] && fetch -q -T 20 -o $s.new "http://$gw:8642/bsd-tier1-in-vm.sh" 2>/dev/null; then
+              mv $s.new $s
+            fi
+            sh $s "$TEST_SUITE"
         env:
           TEST_SUITE: ${{ matrix.test-suite }}
           TIMEOUT_FACTOR: ${{ inputs.timeout-factor }}
