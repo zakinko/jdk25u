@@ -831,9 +831,17 @@ if [ -f $R/make-support/exit-with-error ]; then
       # A test jtreg runs in an agent VM is not on "main" there but on a
       # thread of the agent's own, so take that one by what it runs.
       if grep -q 'Running jstack' "$jtr"; then
-        awk 'BEGIN { RS = "" }
+        stacks=`awk 'BEGIN { RS = "" }
              /^"(main|MainThread|AgentVMThread)"/ || /AgentVMRunnable|jdk\.jshell|com\.sun\.tools\.jdi|jdk\.jdi|com\.sun\.tools\.javac/ { print; print "" }' "$jtr" |
-          head -120
+          head -120`
+        # OpenBSD's jshell timeouts printed only the dump's header here, so
+        # the dump is not laid out as the pattern expects, or jstack gave
+        # little; then show what the handler wrote as it is.
+        if printf '%s\n' "$stacks" | grep -q '^[[:space:]]*at '; then
+          printf '%s\n' "$stacks"
+        else
+          sed -n '/Running jstack/,$p' "$jtr" | head -80
+        fi
       fi
     done
   # A crash names only its problematic frame on the console; what faulted
