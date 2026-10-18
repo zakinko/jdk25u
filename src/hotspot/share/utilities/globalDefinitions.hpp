@@ -1154,6 +1154,14 @@ static inline julong g_uabs(T n) { return g_uabs((jlong)n); }
 template <typename T, std::enable_if_t<std::is_same<T, unsigned long>::value &&
                                        !std::is_same<unsigned long, julong>::value, int> = 0>
 static inline julong g_uabs(T n) { return g_uabs((julong)n); }
+// The other way round on macOS, where jlong is long and int64_t is long
+// long, so an int64_t difference has nothing to match either.
+template <typename T, std::enable_if_t<std::is_same<T, long long>::value &&
+                                       !std::is_same<long long, jlong>::value, int> = 0>
+static inline julong g_uabs(T n) { return g_uabs((jlong)n); }
+template <typename T, std::enable_if_t<std::is_same<T, unsigned long long>::value &&
+                                       !std::is_same<unsigned long long, julong>::value, int> = 0>
+static inline julong g_uabs(T n) { return g_uabs((julong)n); }
 
 // "to" should be greater than "from."
 inline size_t byte_size(void* from, void* to) {
