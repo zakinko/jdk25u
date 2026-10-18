@@ -64,6 +64,11 @@ if [ -f bundles.sha256 ] && command -v sha256sum >/dev/null 2>&1; then
     sums=`cd bundles && sha256sum -c ../bundles.sha256 2>/dev/null` || rc=$?
     [ $rc -ne 0 ] || break
     bad=`echo "$sums" | sed -n 's/: FAILED.*$//p'`
+    # GNU sha256sum reports a file that never arrived as "FAILED open or
+    # read"; FreeBSD's prints only an error, so look for those by name.
+    bad="$bad $(cd bundles && awk '{ sub(/^\*/, "", $2); print $2 }' ../bundles.sha256 |
+      while read f; do [ -e "$f" ] || echo "$f"; done)"
+    bad=`for f in $bad; do echo "$f"; done | sort -u`
     echo "$sums" | grep -v ': OK$' | head -20 | tee -a "$PWD/setup.txt"
     try=`expr $try + 1`
     if [ $try -gt 3 ] || [ -z "$bad" ]; then
