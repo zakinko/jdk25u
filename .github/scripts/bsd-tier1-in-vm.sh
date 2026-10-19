@@ -834,20 +834,17 @@ if [ -f $R/make-support/exit-with-error ]; then
       # A test that timed out is a hang only the thread dump jtreg took of it
       # can explain, and that is in the .jtr, which the log does not show.
       # The test's own threads and any in jshell, JDI or javac code, here.
-      # A test jtreg runs in an agent VM is not on "main" there but on a
-      # thread of the agent's own, so take that one by what it runs.
       if grep -q 'Running jstack' "$jtr"; then
-        stacks=`awk 'BEGIN { RS = "" }
-             /^"(main|MainThread|AgentVMThread)"/ || /AgentVMRunnable|jdk\.jshell|com\.sun\.tools\.jdi|jdk\.jdi|com\.sun\.tools\.javac/ { print; print "" }' "$jtr" |
-          head -120`
-        # OpenBSD's jshell timeouts printed only the dump's header here, so
-        # the dump is not laid out as the pattern expects, or jstack gave
-        # little; then show what the handler wrote as it is.
-        if printf '%s\n' "$stacks" | grep -q '^[[:space:]]*at '; then
-          printf '%s\n' "$stacks"
-        else
-          sed -n '/Running jstack/,$p' "$jtr" | head -80
-        fi
+        # Every thread of the dump but the VM's own housekeeping ones, so
+        # that the test's thread is not crowded out by threads jshell left
+        # behind (OpenBSD's ModifiersTest had two such JDI sets), and not
+        # cut off by a line limit before it is reached (ToolSimpleTest's
+        # stopped at the eleventh of nineteen).
+        sed -n '/Running jstack/,$p' "$jtr" |
+          awk 'BEGIN { RS = "" }
+               /^"(Reference Handler|Finalizer|Signal Dispatcher|Service Thread|Monitor Deflation Thread|Notification Thread|Common-Cleaner|C[12] CompilerThread[0-9]*|GC Thread|G1 |VM |Attach Listener)/ { next }
+               /^"/ { print; print "" }' |
+          head -300
       fi
     done
   # A crash names only its problematic frame on the console; what faulted
