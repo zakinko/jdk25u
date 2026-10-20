@@ -1834,8 +1834,9 @@ bool os::pd_commit_memory(char* addr, size_t size, bool exec) {
   // reservation, where a later commit replaces it and its owner's munmap
   // later takes committed pages away.  Every range reserved here is mapped
   // already, so give it the access instead; the pages are zero-filled, as
-  // pd_uncommit_memory leaves them.  A range with something unmapped in it,
-  // which mprotect refuses as a whole, is mapped over as before.  So is one
+  // pd_uncommit_memory leaves them unless its last resort was needed.  A
+  // range with something unmapped in it, which mprotect refuses as a
+  // whole, is mapped over as before.  So is one
   // that does not start on a page: DragonFly's mprotect rounds the address
   // down and changes whatever page that lands in, where mmap says EINVAL
   // (TestMemoryAllocationLogging#testCommitFailed asks for that).
@@ -1967,11 +1968,14 @@ bool os::pd_uncommit_memory(char* addr, size_t size, bool exec) {
   // before the old one is removed, and removes and inserts under separate
   // map locks, where another thread's mmap can take the hole.  Either way
   // it fails, and os::uncommit_memory stops the VM with "Failed to
-  // uncommit" (GetLockOwnerName, in tier1).  When it does, take the access
-  // away and let the pages go when the kernel wants them.  pd_commit_memory
-  // gives the access back with mprotect, and committed memory is expected to
-  // read as zero, so clear the pages first: whether the kernel has taken
-  // them or not, they then come back zero-filled.
+  // uncommit" (GetLockOwnerName, in tier1).  When it got as far as removing
+  // the range, put fresh pages back exactly there: MAP_TRYFIXED maps at
+  // that address or not at all, and removes nothing, so it fills the hole
+  // if nobody took it and leaves alone whatever did.  Otherwise take the
+  // access away and let the pages go when the kernel wants them.  Nothing
+  // may be written to the range then: part of it can be unmapped or another
+  // thread's (clearing it, to have it read as zero on the next commit, put
+  // G1's service thread into a hole with SEGV_MAPERR).
   uintptr_t res = (uintptr_t) ::mmap(addr, size, PROT_NONE,
                                      MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE|MAP_ANONYMOUS, -1, 0);
   if (res != (uintptr_t) MAP_FAILED) {
@@ -1988,12 +1992,15 @@ bool os::pd_uncommit_memory(char* addr, size_t size, bool exec) {
       return false;
     }
   }
-  bool cleared = ::mprotect(addr, size, PROT_READ|PROT_WRITE) == 0;
-  if (cleared) {
-    ::memset(addr, 0, size);
+  res = (uintptr_t) ::mmap(addr, size, PROT_NONE,
+                           MAP_PRIVATE|MAP_TRYFIXED|MAP_NORESERVE|MAP_ANONYMOUS, -1, 0);
+  if (res == (uintptr_t) addr) {
+    return true;
   }
-  if (!cleared ||
-      ::mprotect(addr, size, PROT_NONE) != 0 ||
+  if (res != (uintptr_t) MAP_FAILED) {
+    ::munmap((char*) res, size);
+  }
+  if (::mprotect(addr, size, PROT_NONE) != 0 ||
       ::madvise(addr, size, MADV_FREE) != 0) {
     ErrnoPreserver ep;
     log_trace(os, map)("mprotect/madvise failed: " RANGEFMT " errno=(%s)",
