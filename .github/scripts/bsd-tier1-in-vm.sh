@@ -371,29 +371,6 @@ PROBE
       "$PWD/destroyprobe/DestroyProbe.java" 2>&1 | tail -45 | tee -a "$PWD/setup.txt" || :
 fi
 
-# serviceability/threads/ThreadInfoTest times out on NetBSD now and then:
-# its main loop waits for both of two short-lived threads to be dead at
-# once, and one of them sleeps 1 ms, which only works out if a 1 ms sleep
-# is about 1 ms.  Time Thread.sleep(1) and Thread.sleep(10) here.
-case "$suite" in *tier1_serviceability)
-  mkdir -p "$PWD/sleepprobe"
-  cat > "$PWD/sleepprobe/SleepProbe.java" <<'PROBE'
-public class SleepProbe {
-    public static void main(String[] args) throws Exception {
-        for (int ms : new int[] { 1, 10 }) {
-            int n = 200;
-            long t0 = System.nanoTime();
-            for (int i = 0; i < n; i++) Thread.sleep(ms);
-            System.out.printf("sleep probe: Thread.sleep(%d) takes %.2f ms on average%n",
-                              ms, (System.nanoTime() - t0) / 1e6 / n);
-        }
-    }
-}
-PROBE
-  "$JDK/bin/java" "$PWD/sleepprobe/SleepProbe.java" 2>&1 | tail -3 | tee -a "$PWD/setup.txt" || :
-  sysctl kern.clockrate 2>/dev/null | sed 's/^/sleep probe: /' | tee -a "$PWD/setup.txt" || :
-;; esac
-
 # compiler/loopopts/TestMaxLoopOptsCountReached times out on OpenBSD
 # alone, on amd64 under KVM as on aarch64, with C2 still on its one
 # compile -- and on amd64 the compiler thread had used only 120 of the
