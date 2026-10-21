@@ -371,6 +371,42 @@ PROBE
       "$PWD/destroyprobe/DestroyProbe.java" 2>&1 | tail -45 | tee -a "$PWD/setup.txt" || :
 fi
 
+# jshell tests time out now and then on OpenBSD amd64, each time in
+# JShell.<init>: JdiDefaultExecutionControl.create waits in
+# Util.remoteInputOutput for the remote agent's stream header, which never
+# comes, though JDI has attached to the agent VM.  jtreg's jstack covers
+# only the test's VM.  Start jshell here a number of times, and if one
+# takes over 90 s, dump every Java process there is, the agent included.
+if [ "$os" = OpenBSD ] && [ "`uname -m`" = amd64 ]; then
+  case "$suite" in *langtools*)
+    n=0 slow=0
+    while [ $n -lt 40 ]; do
+      n=`expr $n + 1`
+      t0=`date +%s`
+      echo '/exit' | "$JDK/bin/jshell" -q > "$PWD/jshellprobe.out" 2>&1 &
+      pid=$!
+      w=0
+      while kill -0 $pid 2>/dev/null && [ $w -lt 90 ]; do sleep 1; w=`expr $w + 1`; done
+      if kill -0 $pid 2>/dev/null; then
+        slow=`expr $slow + 1`
+        echo "jshell probe: start $n still running after 90 s; the Java processes:" | tee -a "$PWD/setup.txt"
+        for j in `pgrep java`; do
+          ps -o pid,ppid,etime,command -p $j 2>/dev/null | tail -1 | cut -c1-200 | sed 's/^/jshell probe:   /' | tee -a "$PWD/setup.txt"
+          "$JDK/bin/jstack" $j 2>&1 | awk 'BEGIN { RS = "" }
+               /^"(Reference Handler|Finalizer|Signal Dispatcher|Service Thread|Monitor Deflation Thread|Notification Thread|Common-Cleaner|C[12] CompilerThread[0-9]*|GC Thread|G1 |VM |Attach Listener)/ { next }
+               /^"/ { print; print "" }' | head -80 | sed 's/^/jshell probe:     /' | tee -a "$PWD/setup.txt"
+        done
+        pkill -9 -f jshell 2>/dev/null || :
+        pkill -9 -f RemoteExecutionControl 2>/dev/null || :
+        break
+      fi
+      wait $pid 2>/dev/null || :
+      [ $n -eq 1 ] && echo "jshell probe: first start took `expr \`date +%s\` - $t0` s" | tee -a "$PWD/setup.txt"
+    done
+    echo "jshell probe: $n starts, $slow over 90 s" | tee -a "$PWD/setup.txt"
+  ;; esac
+fi
+
 # compiler/loopopts/TestMaxLoopOptsCountReached times out on OpenBSD
 # alone, on amd64 under KVM as on aarch64, with C2 still on its one
 # compile -- and on amd64 the compiler thread had used only 120 of the
